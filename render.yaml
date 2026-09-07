@@ -3,7 +3,7 @@ services:
     name: paint-party
     runtime: node
     plan: free
-    buildCommand: npm cache clean --force; npm install @rolldown/binding-linux-x64-gnu@1.2.7 --no-save --loglevel=verbose --prefer-online 2>&1 | tail -150; npm ci; npm run build
+    buildCommand: npm ci && npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_VERSION
