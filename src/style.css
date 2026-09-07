@@ -1,0 +1,257 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: #1b1620;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  padding: 18px 0 32px;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(96vw, 1280px);
+  gap: 10px;
+}
+
+#stage {
+  width: 100%;
+}
+
+#hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 52px;
+  padding: 0 18px;
+  margin-bottom: 8px;
+  background: #241f29;
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+#hudTimer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 18px;
+  min-width: 40px;
+  text-align: center;
+  transition: font-size 0.15s ease, color 0.15s ease;
+}
+
+#hudTimer.hud-timer-urgent {
+  font-size: 30px;
+  color: #ff4d4d;
+  text-shadow: 0 0 10px rgba(255, 77, 77, 0.6);
+}
+
+#hudScores {
+  display: flex;
+  gap: 14px;
+}
+
+#hudScores span {
+  white-space: nowrap;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1280 / 720;
+  background: #eef0f4;
+  border-radius: 4px;
+  box-shadow: 0 16px 46px rgba(0, 0, 0, 0.5);
+  image-rendering: crisp-edges;
+}
+
+#settings,
+#online {
+  width: 100%;
+  background: #241f29;
+  color: #eee;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+}
+
+#settings summary,
+#online summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #ffd60a;
+}
+
+.settingsHint {
+  opacity: 0.75;
+  margin: 8px 0 12px;
+  line-height: 1.4;
+}
+
+#settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+#settings input,
+#online input {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #453e4e;
+  background: #17131c;
+  color: #fff;
+}
+
+.settingsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settingsRow input[type="text"] {
+  flex: 1 1 260px;
+}
+
+.settingsRow input[type="file"] {
+  flex: 0 0 auto;
+  max-width: 220px;
+  font-size: 12px;
+  color: #cfc8da;
+}
+
+.clearFileBtn {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #453e4e;
+  background: #17131c;
+  color: #cfc8da;
+  cursor: pointer;
+}
+
+.volumeRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 0;
+}
+
+.volumeRow label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.75;
+  flex: 0 0 auto;
+}
+
+.volumeRow input[type="range"] {
+  flex: 1 1 auto;
+  max-width: 220px;
+  accent-color: #ffd60a;
+}
+
+.audioSourceStatus {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.7;
+  margin: -6px 0 10px;
+}
+
+.settingsActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#saveAudioBtn {
+  font: inherit;
+  font-weight: 700;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: none;
+  background: #ffd60a;
+  color: #241f29;
+  cursor: pointer;
+}
+
+#audioSaveStatus {
+  color: #6ee7a0;
+  font-weight: 600;
+}
+
+#onlineCreateBtn,
+#onlineJoinBtn,
+#onlineStartBtn {
+  font: inherit;
+  font-weight: 700;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: none;
+  background: #ffd60a;
+  color: #241f29;
+  cursor: pointer;
+}
+
+#onlineJoinCode {
+  flex: 0 0 100px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+#onlineStatus {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6ee7a0;
+  margin: 4px 0 8px;
+}
+
+#onlinePlayerList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#onlinePlayerList li {
+  background: #17131c;
+  border: 1px solid #453e4e;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.ytMount {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
