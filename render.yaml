@@ -3,7 +3,7 @@ services:
     name: paint-party
     runtime: node
     plan: free
-    buildCommand: node -e "console.log('platform', process.platform, process.arch)" && cat /etc/os-release; npm config get omit; env | grep -i npm; npm ci; ls node_modules/@rolldown; npm run build
+    buildCommand: npm ci && npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_VERSION
