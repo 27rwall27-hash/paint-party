@@ -25,13 +25,35 @@ function loop(time: number): void {
   lastTime = time;
 
   if (onlineMode.active && onlineMode.session) {
-    // Online play is fully server-authoritative — everyone uses WASD + Space regardless of
-    // which slot they were assigned, and the client only sends input and renders snapshots.
-    // The server's session timestamps (stateEnteredAt, roundEndAt, ...) are Date.now()-based,
-    // not requestAnimationFrame's performance.now()-based `time` — render() needs "now" in the
-    // same clock domain as those or every elapsed-time calculation comes out wildly wrong.
-    render(ctx, onlineMode.session, Date.now());
-    onlineMode.sendInput?.(input.getInput(PLAYER_DEFS[0]!.keys));
+    // Online play's session timestamps come from the host's setInterval tick, which uses
+    // wall-clock Date.now() — never requestAnimationFrame's unrelated performance.now(). render()
+    // needs "now" in that same clock domain or every elapsed-time calculation comes out wildly
+    // wrong (this exact mismatch once froze the tab in an earlier design — see hostLoop.ts).
+    const now = Date.now();
+
+    if (onlineMode.role === "guest") {
+      const localInput = input.getInput(PLAYER_DEFS[0]!.keys);
+      const mySlot = onlineMode.mySlot;
+      if (mySlot !== undefined && onlineMode.predictedPlayer && onlineMode.lastAuthoritativePlayer) {
+        const predicted = onlineMode.predictedPlayer.update(onlineMode.lastAuthoritativePlayer, localInput, now);
+        onlineMode.session.players[mySlot] = predicted;
+      }
+      if (onlineMode.interpolator) {
+        for (const p of onlineMode.session.players) {
+          if (p.id === mySlot) continue;
+          const pos = onlineMode.interpolator.currentPosition(p.id, now);
+          if (pos) {
+            p.x = pos.x;
+            p.y = pos.y;
+          }
+        }
+      }
+      onlineMode.sendInput?.(localInput);
+    }
+    // Host role: nothing to do here — hostLoop.ts's own setInterval already drives
+    // session.update() independent of this render loop; we just draw its current state.
+
+    render(ctx, onlineMode.session, now);
   } else {
     session.update(dt, time, input);
     render(ctx, session, time);

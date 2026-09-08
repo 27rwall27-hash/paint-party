@@ -26,14 +26,6 @@ interface Box {
   h: number;
 }
 
-/** Swappable so a Node server (no `document`) can supply a `@napi-rs/canvas` canvas instead —
- * the browser default is untouched unless something calls setCanvasFactory(). */
-let canvasFactory: () => HTMLCanvasElement = () => document.createElement("canvas");
-
-export function setCanvasFactory(factory: () => HTMLCanvasElement): void {
-  canvasFactory = factory;
-}
-
 function clampBox(cx: number, cy: number, r: number): Box {
   const pad = r + 4;
   const x = Math.max(0, Math.floor(cx - pad));
@@ -80,7 +72,7 @@ export class Outline {
     this.boundingRadius = built.boundingRadius * Math.max(1, widthScale, heightScale);
     this.bbox = clampBox(spec.cx, spec.cy, this.boundingRadius);
 
-    this.paintCanvas = canvasFactory();
+    this.paintCanvas = document.createElement("canvas");
     this.paintCanvas.width = CANVAS_W;
     this.paintCanvas.height = CANVAS_H;
     const ctx = this.paintCanvas.getContext("2d");
@@ -91,7 +83,7 @@ export class Outline {
   }
 
   private computeAreaPixels(): number {
-    const maskCanvas = canvasFactory();
+    const maskCanvas = document.createElement("canvas");
     maskCanvas.width = this.bbox.w;
     maskCanvas.height = this.bbox.h;
     const ctx = maskCanvas.getContext("2d");

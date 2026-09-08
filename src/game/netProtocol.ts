@@ -1,7 +1,7 @@
-// Wire protocol shared between the browser client (NetworkClient.ts) and the room/authoritative
-// game server (server/*.ts). Kept as plain types with no runtime code so either side can import
-// it freely. Gameplay types (Player, Sweep, Projectile, Eraser, Impact, OutlineResult) are
-// reused as-is from the game modules — they're already plain, JSON-safe data shapes.
+// Payload shapes carried over Supabase Realtime (presence + broadcast) between the host's browser
+// tab (the authoritative simulation) and guest tabs. Plain types only, no runtime code, so either
+// side can import freely. Gameplay types (Player, Sweep, Projectile, Eraser, Impact, OutlineResult)
+// are reused as-is from the game modules — they're already plain, JSON-safe data shapes.
 
 import type { GameState, PaintEvent, Sweep, Projectile, Eraser, Impact } from "./GameSession.ts";
 import type { Player } from "./Player.ts";
@@ -10,13 +10,9 @@ import type { PowerupState } from "./Outline.ts";
 import type { PowerupType } from "./constants.ts";
 import type { OutlineResult } from "./scoring.ts";
 
-export interface LobbyPlayer {
-  slot: number;
-}
-
-/** The resolved shape for one outline slot this round — sent by the server (the authority on
- * which custom shapes, if any, are actually available) rather than assumed from the client's
- * own static ROUNDS config, since the two can differ (see NetOutlineSpec usage in GameRoom). */
+/** The resolved shape for one outline slot this round. Host and guests run the same bundle so
+ * they'd normally resolve ROUNDS identically, but a guest on a stale cached build is a real (if
+ * rare) desync vector — broadcasting the host's resolved shapes removes that assumption. */
 export interface NetOutlineSpec {
   kind: string;
   cx: number;
@@ -40,33 +36,58 @@ export interface NetPowerup {
   expiresAt: number;
 }
 
-export type ClientMessage =
-  | { type: "create" }
-  | { type: "join"; code: string }
-  | { type: "start" }
-  | { type: "input"; state: PlayerInputState };
+/** Presence payload every client (host and guests) tracks on the room channel — this alone is
+ * the live lobby roster, no separate "lobby" message needed. */
+export interface PresencePayload {
+  clientId: string;
+  name: string;
+  slot: number | null;
+  isHost: boolean;
+}
 
-export type ServerMessage =
-  | { type: "joined"; code: string; slot: number }
-  | { type: "lobby"; code: string; players: LobbyPlayer[] }
-  | { type: "error"; message: string }
-  | {
-      type: "snapshot";
-      state: GameState;
-      roundIndex: number;
-      roundEndAt: number;
-      stateEnteredAt: number;
-      resultsDurationMs: number;
-      resultsPerOutlineMs: number;
-      /** Only present when the round just changed — the client keeps its last copy otherwise,
-       * both to save bandwidth and so it doesn't wipe its local paint canvases every tick. */
-      outlineSpecs?: NetOutlineSpec[];
-      players: Player[];
-      powerups: NetPowerup[];
-      sweeps: Sweep[];
-      projectiles: Projectile[];
-      erasers: Eraser[];
-      impacts: Impact[];
-      lastResults: OutlineResult[];
-    }
-  | { type: "paint"; events: PaintEvent[] };
+/** Host -> one guest (filtered by clientId): assigns that guest's player slot once it joins. */
+export interface SlotAssignPayload {
+  clientId: string;
+  slot: number;
+}
+
+/** Host -> one guest (filtered by clientId): e.g. room already has 4 players. */
+export interface RoomErrorPayload {
+  clientId: string;
+  message: string;
+}
+
+/** Guest -> host: this guest's latest input state for its assigned slot. */
+export interface InputPayload {
+  slot: number;
+  state: PlayerInputState;
+}
+
+/** Host -> all: a full snapshot of session state, broadcast on a throttled schedule (not every
+ * simulation tick) to conserve Realtime message volume — guests interpolate between snapshots. */
+export interface SnapshotPayload {
+  state: GameState;
+  roundIndex: number;
+  roundEndAt: number;
+  stateEnteredAt: number;
+  resultsDurationMs: number;
+  resultsPerOutlineMs: number;
+  /** Always included (cheap — a handful of small objects) rather than only on round change, so a
+   * guest whose join is still settling right as a round starts can't miss it and end up with no
+   * outlines for the rest of that round. Guests decide for themselves whether to rebuild their
+   * local Outline instances by comparing roundIndex, not by whether this field is present. */
+  outlineSpecs: NetOutlineSpec[];
+  players: Player[];
+  powerups: NetPowerup[];
+  sweeps: Sweep[];
+  projectiles: Projectile[];
+  erasers: Eraser[];
+  impacts: Impact[];
+  lastResults: OutlineResult[];
+}
+
+/** Host -> all: paint actions from this broadcast interval, batched, so guests can replay them
+ * onto their own local paint canvases without needing pixel data over the wire. */
+export interface PaintBatchPayload {
+  events: PaintEvent[];
+}
