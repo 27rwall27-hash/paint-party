@@ -13,19 +13,15 @@ import {
   PROJECTILE_ARC_HEIGHT,
   PROJECTILE_DURATION_MS,
   PROJECTILE_MIN_SCALE,
-  RESULTS_MANY_OUTLINES_THRESHOLD,
   ROUND_INTRO_MS,
   TICK_WINDOW_MS,
 } from "./constants.ts";
 import type { GameSession } from "./GameSession.ts";
 import { currentMaxRadius, isMachineGunActive } from "./Player.ts";
 import { ROUNDS } from "./rounds.ts";
-import type { OutlineResult } from "./scoring.ts";
 
 const BG = "#eef0f4";
 const INK = "#241f29";
-const RESULTS_SHAPE_RADIUS = 140;
-const RESULTS_SHAPE_CENTER_Y = 340;
 const REVEAL_FLY_DURATION_MS = 550;
 
 let canvasTexture: CanvasPattern | null | undefined;
@@ -548,7 +544,6 @@ function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: n
 }
 
 function drawRoundResults(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
-  drawPanel(ctx, 0.78);
   const elapsed = now - session.stateEnteredAt;
   const n = session.lastResults.length;
   const cycleEnd = n * session.resultsPerOutlineMs;
@@ -556,104 +551,63 @@ function drawRoundResults(ctx: CanvasRenderingContext2D, session: GameSession, n
   ctx.textAlign = "center";
 
   if (n === 0 || elapsed >= cycleEnd) {
+    drawPanel(ctx, 0.78);
     drawRoundTotals(ctx, session);
   } else {
-    const idx = Math.max(0, Math.min(n - 1, Math.floor(elapsed / session.resultsPerOutlineMs)));
-    const result = session.lastResults[idx]!;
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 30px 'Segoe UI', sans-serif";
-    ctx.fillText(`Outline ${idx + 1} of ${n} — ${result.kind}`, CANVAS_W / 2, 90);
-
-    // The finale's 30-outline fast cycling is meant to blur past quickly — the shape-and-reveal
-    // treatment below needs real time to read, so only the normal (few-outline) rounds get it.
-    if (n > RESULTS_MANY_OUTLINES_THRESHOLD) {
-      drawResultsRankedList(ctx, session, result);
-    } else {
-      drawResultsShapeReveal(ctx, session, idx, elapsed);
-    }
-
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "16px 'Segoe UI', sans-serif";
-    if (n <= 20) {
-      const dots = Array.from({ length: n }, (_, i) => (i === idx ? "●" : "○")).join("  ");
-      ctx.fillText(dots, CANVAS_W / 2, CANVAS_H - 90);
-    } else {
-      ctx.fillText(`Outline ${idx + 1} / ${n}`, CANVAS_W / 2, CANVAS_H - 90);
-    }
+    // No overlay here — the board (outlines, paint, frame) is already fully drawn earlier this
+    // frame; the point reveal just floats small "+N" text above each outline right where it
+    // actually sits, in that player's color, as its turn in the timeline comes up.
+    drawResultsInPlaceReveal(ctx, session, elapsed);
   }
 
   const totalDuration = Math.max(session.resultsDurationMs, 1);
   const secsLeft = Math.max(0, Math.ceil((totalDuration - elapsed) / 1000));
-  ctx.fillStyle = "#fff";
-  ctx.font = "18px 'Segoe UI', sans-serif";
-  ctx.fillText(`Next round in ${secsLeft}s`, CANVAS_W / 2, CANVAS_H - 40);
-}
-
-/** The finale's fast-cycling fallback — today's original ranked list, kept simple since 30
- * outlines fly by too quickly for the shape/reveal treatment to read anyway. */
-function drawResultsRankedList(ctx: CanvasRenderingContext2D, session: GameSession, result: OutlineResult): void {
-  const sorted = [...result.ranking].sort((a, b) => b.pixels - a.pixels);
-  sorted.forEach((entry, row) => {
-    const player = session.players.find((p) => p.id === entry.playerId);
-    const y = 200 + row * 60;
-    ctx.fillStyle = player?.color ?? "#fff";
-    ctx.beginPath();
-    ctx.arc(CANVAS_W / 2 - 220, y - 8, 12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.textAlign = "left";
-    ctx.font = "bold 22px 'Segoe UI', sans-serif";
-    ctx.fillText(player?.name ?? "?", CANVAS_W / 2 - 195, y);
-    ctx.textAlign = "right";
-    ctx.fillStyle = entry.points > 0 ? "#ffd60a" : "rgba(255,255,255,0.5)";
-    ctx.font = "bold 22px 'Segoe UI', sans-serif";
-    ctx.fillText(`+${entry.points}`, CANVAS_W / 2 + 220, y);
-    ctx.textAlign = "center";
-  });
-}
-
-/** Draws the outline's actual shape, scaled to a consistent display size regardless of its real
- * in-round radius, then animates each scoring player's "+N" appearing just above it and flying
- * upward — purely a function of elapsed time against session.revealTimeline, same pattern as
- * every other animated effect in this file (impacts, projectiles, the curtain). */
-function drawResultsShapeReveal(ctx: CanvasRenderingContext2D, session: GameSession, outlineIndex: number, elapsed: number): void {
-  const outline = session.outlines[outlineIndex];
-  if (!outline) return;
-
-  const cx = CANVAS_W / 2;
-  const cy = RESULTS_SHAPE_CENTER_Y;
-  const scale = RESULTS_SHAPE_RADIUS / Math.max(1, outline.boundingRadius);
-
   ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(scale, scale);
-  ctx.translate(-outline.cx, -outline.cy);
-  ctx.fillStyle = "rgba(255,255,255,0.14)";
-  ctx.fill(outline.path);
-  ctx.strokeStyle = "rgba(255,255,255,0.85)";
-  ctx.lineWidth = 3 / scale;
-  ctx.stroke(outline.path);
+  ctx.fillStyle = "rgba(20,17,24,0.6)";
+  const label = `Next round in ${secsLeft}s`;
+  ctx.font = "bold 18px 'Segoe UI', sans-serif";
+  const w = ctx.measureText(label).width;
+  ctx.fillRect(CANVAS_W / 2 - w / 2 - 14, CANVAS_H - 58, w + 28, 30);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, CANVAS_W / 2, CANVAS_H - 37);
   ctx.restore();
+}
 
-  const startY = cy - RESULTS_SHAPE_RADIUS - 24;
-  const endY = 50;
+/** Animates each scoring player's "+N" appearing just above its own outline's real position and
+ * radius on the board and floating upward, purely a function of elapsed time against
+ * session.revealTimeline — same pattern as every other animated effect in this file (impacts,
+ * projectiles, the curtain). A stroke outline keeps it legible over whatever's already painted
+ * there, since there's no dimming panel behind it to guarantee contrast. */
+function drawResultsInPlaceReveal(ctx: CanvasRenderingContext2D, session: GameSession, elapsed: number): void {
+  const FLOAT_DISTANCE = 70;
+  // boundingRadius is calibrated conservatively for overlap/collision checks, not visual size —
+  // a tall thin custom shape can report one big enough to push "just above it" off the top of the
+  // canvas entirely. Clamp the float's whole range (start AND the 70px it rises further) clear of
+  // the frame/HUD, not just its starting point.
+  const MIN_START_Y = 90 + FLOAT_DISTANCE;
   for (const step of session.revealTimeline) {
-    if (step.outlineIndex !== outlineIndex) continue;
     const t = (elapsed - step.atMs) / REVEAL_FLY_DURATION_MS;
     if (t < 0 || t >= 1) continue;
+    const outline = session.outlines[step.outlineIndex];
+    if (!outline) continue;
 
     const player = session.players.find((p) => p.id === step.playerId);
+    const startY = Math.max(MIN_START_Y, outline.cy - outline.boundingRadius - 16);
     const popT = Math.min(1, t / 0.25);
     const pop = 1 + 0.3 * Math.sin(popT * Math.PI);
-    const eased = t * t * (3 - 2 * t); // smoothstep — quick pop, then an easing shot upward
-    const y = startY - (startY - endY) * eased;
+    const eased = t * t * (3 - 2 * t); // smoothstep — quick pop, then an easing float upward
+    const y = startY - FLOAT_DISTANCE * eased;
     const alpha = t < 0.7 ? 1 : Math.max(0, 1 - (t - 0.7) / 0.3);
 
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = player?.color ?? "#fff";
-    ctx.font = `bold ${Math.round(34 * pop)}px 'Segoe UI', sans-serif`;
+    ctx.font = `bold ${Math.round(22 * pop)}px 'Segoe UI', sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText(`+${step.points}`, cx, y);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(20,17,24,0.65)";
+    ctx.strokeText(`+${step.points}`, outline.cx, y);
+    ctx.fillStyle = player?.color ?? "#fff";
+    ctx.fillText(`+${step.points}`, outline.cx, y);
     ctx.restore();
   }
 }
