@@ -3,6 +3,7 @@ import {
   CANVAS_W,
   CONFUSE_REDIRECT_MS,
   DEFAULT_MAX_RADIUS,
+  FRAME_THICKNESS,
   GROW_RATE,
   MIN_RADIUS,
   MOVE_SPEED,
@@ -112,8 +113,10 @@ export function updatePlayer(
     const len = Math.hypot(dx, dy);
     player.x += (dx / len) * MOVE_SPEED * dt;
     player.y += (dy / len) * MOVE_SPEED * dt;
-    player.x = Math.max(0, Math.min(CANVAS_W, player.x));
-    player.y = Math.max(0, Math.min(CANVAS_H, player.y));
+    // Clamped to the picture frame's inner edge, not the raw canvas edge, so players can't wander
+    // behind the frame border — applies to confused movement too, since it's the same code path.
+    player.x = Math.max(FRAME_THICKNESS, Math.min(CANVAS_W - FRAME_THICKNESS, player.x));
+    player.y = Math.max(FRAME_THICKNESS, Math.min(CANVAS_H - FRAME_THICKNESS, player.y));
   }
 
   const maxR = currentMaxRadius(player, now);

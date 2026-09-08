@@ -1,6 +1,10 @@
 export const CANVAS_W = 1280;
 export const CANVAS_H = 720;
 
+// The ornate picture frame's border thickness — shared between render.ts (drawing it, and sizing
+// the curtain to fully mask it) and Player.ts (keeping players from wandering behind it).
+export const FRAME_THICKNESS = 44;
+
 export type PowerupType = "shrink" | "sweep" | "machinegun" | "clear" | "eraser" | "bigshot" | "confuse";
 
 export interface KeyBinding {
@@ -100,10 +104,10 @@ export const RESULTS_MANY_OUTLINES_TOTAL_MS = 6500;
 
 // The "Player X Wins!" reveal after the finale's results: a longer, drum-roll-backed curtain hold
 // and a slower open than a normal between-round transition, to build extra suspense — then holds
-// open with continuous confetti for the rest, before the existing final-scores screen takes over.
+// open with continuous confetti for as long as players want, moving on to the final-scores screen
+// only once someone presses paint (no auto-timeout).
 export const VICTORY_CURTAIN_HOLD_MS = 1800;
 export const VICTORY_CURTAIN_OPEN_MS = 2200;
-export const VICTORY_MS = 7100;
 
 export const DEFAULT_POINTS_BY_RANK = [3, 2, 1, 0];
 export const FINALE_POINTS_BY_RANK = [1, 0.5, 0.25, 0];

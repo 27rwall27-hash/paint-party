@@ -4,6 +4,7 @@ import {
   CURTAIN_CLOSE_MS,
   CURTAIN_OPEN_MS,
   DEFAULT_MAX_RADIUS,
+  FRAME_THICKNESS,
   GUN_BASE_Y,
   GUN_BODY_RADIUS,
   GUN_LENGTH,
@@ -111,10 +112,8 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
 }
 
 /** Thick, ornate gallery picture frame around the whole canvas — HUD lives outside it, in the DOM.
- * FRAME_THICKNESS is shared with drawCurtainPanels so a closed/closing curtain always covers
- * exactly this same border, never leaving a sliver of frame visible past its edge. */
-const FRAME_THICKNESS = 44;
-
+ * FRAME_THICKNESS (constants.ts) is shared with drawCurtainPanels and the player-movement clamp,
+ * so the curtain always covers exactly this same border and players can't wander behind it. */
 function drawFrame(ctx: CanvasRenderingContext2D): void {
   const outer = FRAME_THICKNESS;
   ctx.save();
@@ -578,9 +577,13 @@ function drawVelvetPanel(ctx: CanvasRenderingContext2D, x: number, w: number): v
 /** Draws the velvet side panels at a given "how closed" amount (0 = fully open/no panel, 1 =
  * fully closed/meeting in the middle) — shared by the round-intro opening, the results-screen
  * closing tail, and the victory reveal's opening, so the motion is visually continuous across all
- * three (a close always ends exactly where the next open begins). Always called after drawFrame()
- * and sized to FRAME_THICKNESS on every edge, so the curtain fully masks the picture frame too —
- * not just the inner canvas — everywhere it's used. */
+ * three (a close always ends exactly where the next open begins). Always called after drawFrame();
+ * each panel already fills the full canvas height (see drawVelvetPanel), so the two panels alone
+ * fully mask the picture frame's border — top and bottom included — the instant they meet in the
+ * middle, with no separate full-width bar needed (a full-width bar here would sit as a static
+ * "shadow band" across the top/bottom that doesn't recede as the panels open — the bug this
+ * comment used to describe fixing, badly). The valance strip below is purely decorative and scoped
+ * to each panel's own width so it opens and closes in step with the rest of the curtain. */
 function drawCurtainPanels(ctx: CanvasRenderingContext2D, closedAmount: number): void {
   const half = CANVAS_W / 2;
   const panelW = half * Math.max(0, Math.min(1, closedAmount));
@@ -591,8 +594,8 @@ function drawCurtainPanels(ctx: CanvasRenderingContext2D, closedAmount: number):
 
   ctx.save();
   ctx.fillStyle = "#3a2312";
-  ctx.fillRect(0, 0, CANVAS_W, FRAME_THICKNESS);
-  ctx.fillRect(0, CANVAS_H - FRAME_THICKNESS, CANVAS_W, FRAME_THICKNESS);
+  ctx.fillRect(0, 0, panelW, 24);
+  ctx.fillRect(CANVAS_W - panelW, 0, panelW, 24);
   ctx.restore();
 }
 

@@ -44,7 +44,6 @@ import {
   TICK_WINDOW_MS,
   VICTORY_CURTAIN_HOLD_MS,
   VICTORY_CURTAIN_OPEN_MS,
-  VICTORY_MS,
   type PowerupType,
 } from "./constants.ts";
 import type { PlayerInputState } from "./Input.ts";
@@ -231,6 +230,10 @@ export class GameSession {
   revealedCount = 0;
   /** Whether the victory theme has taken over from the drum roll yet this VICTORY state. */
   private victoryRevealed = false;
+  /** Raw "is any paint key currently held" from last frame — used to edge-detect a fresh press
+   * for menu-style state advances (see update()), independent of Player.wasPaintHeld's per-player
+   * charge/release tracking used during PLAYING. */
+  private paintWasHeld = false;
   private lastTickSecond = 0;
   private finalBurstTriggered = false;
 
@@ -247,9 +250,16 @@ export class GameSession {
   }
 
   update(dt: number, now: number, input: InputSource): void {
+    // Edge-triggered (not "currently held") for every menu-style advance below — anyPaintPressed()
+    // stays true for the whole time a key is held, so a single press-and-hold could otherwise
+    // cascade through several state transitions in one go (e.g. VICTORY -> GAME_OVER -> MENU ->
+    // a fresh round all in the ~150ms a button is normally held for).
+    const paintJustPressed = input.anyPaintPressed() && !this.paintWasHeld;
+    this.paintWasHeld = input.anyPaintPressed();
+
     switch (this.state) {
       case "MENU":
-        if (input.anyPaintPressed()) {
+        if (paintJustPressed) {
           this.sound.unlock();
           this.players.forEach((p) => (p.score = 0));
           this.beginRound(0, now);
@@ -289,7 +299,10 @@ export class GameSession {
           this.sound.stopDrumroll();
           this.sound.playVictoryTheme();
         }
-        if (elapsed >= VICTORY_MS) {
+        // No auto-timeout — the reveal stays up as long as players want to soak in it, and only
+        // moves on once someone presses paint (and only after the curtain has actually opened, so
+        // mashing the button during the drum-roll build-up can't skip the reveal itself).
+        if (this.victoryRevealed && paintJustPressed) {
           this.state = "GAME_OVER";
           this.stateEnteredAt = now;
           this.sound.stopVictoryTheme();
@@ -297,7 +310,7 @@ export class GameSession {
         break;
       }
       case "GAME_OVER":
-        if (input.anyPaintPressed()) {
+        if (paintJustPressed) {
           this.state = "MENU";
           this.stateEnteredAt = now;
         }
