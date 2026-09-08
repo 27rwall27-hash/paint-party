@@ -65,8 +65,8 @@ export function computeRoundResults(
       const rank = painters.findIndex((p) => p.playerId === entry.playerId);
       const points = rank === -1 ? 0 : (pointsByRank[rank] ?? 0);
       const percent = (entry.pixels / outline.areaPixels) * 100;
-      const player = players.find((p) => p.id === entry.playerId);
-      if (player) player.score += points;
+      // Scoring no longer applies immediately here — GameSession.updateResults() increments each
+      // player's score live, in sync with the round-results reveal sequence.
       return { playerId: entry.playerId, pixels: entry.pixels, percent, points };
     });
 

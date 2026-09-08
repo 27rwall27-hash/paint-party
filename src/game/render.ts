@@ -9,18 +9,24 @@ import {
   gunStationX,
   IMPACT_FLASH_MS,
   POWERUP_ICONS,
+  POWERUP_PULSE_MS,
   PROJECTILE_ARC_HEIGHT,
   PROJECTILE_DURATION_MS,
   PROJECTILE_MIN_SCALE,
+  RESULTS_MANY_OUTLINES_THRESHOLD,
   ROUND_INTRO_MS,
   TICK_WINDOW_MS,
 } from "./constants.ts";
 import type { GameSession } from "./GameSession.ts";
 import { currentMaxRadius, isMachineGunActive } from "./Player.ts";
 import { ROUNDS } from "./rounds.ts";
+import type { OutlineResult } from "./scoring.ts";
 
 const BG = "#eef0f4";
 const INK = "#241f29";
+const RESULTS_SHAPE_RADIUS = 140;
+const RESULTS_SHAPE_CENTER_Y = 340;
+const REVEAL_FLY_DURATION_MS = 550;
 
 let canvasTexture: CanvasPattern | null | undefined;
 
@@ -174,6 +180,16 @@ function drawPowerups(ctx: CanvasRenderingContext2D, session: GameSession, now: 
     const claimed = p.state === "claimed";
     const owner = claimed ? session.players.find((pl) => pl.id === p.claimedBy) : undefined;
     ctx.save();
+    if (!claimed) {
+      // Decaying pulse for a moment right after spawning, so a new power-up catches the eye
+      // instead of blending into the background — purely a function of elapsed time, like every
+      // other animated effect in this file.
+      const pulseT = Math.max(0, Math.min(1, (now - p.spawnedAt) / POWERUP_PULSE_MS));
+      const pulseScale = 1 + 0.35 * Math.sin(pulseT * Math.PI * 3) * (1 - pulseT);
+      ctx.translate(p.cx, p.cy);
+      ctx.scale(pulseScale, pulseScale);
+      ctx.translate(-p.cx, -p.cy);
+    }
     ctx.beginPath();
     ctx.arc(p.cx, p.cy, p.radius, 0, Math.PI * 2);
     ctx.fillStyle = claimed ? (owner?.color ?? "#999") : "#ffffff";
@@ -232,7 +248,10 @@ function drawSweeps(ctx: CanvasRenderingContext2D, session: GameSession, now: nu
 
 function drawProjectiles(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   for (const proj of session.projectiles) {
-    const t = Math.min(1, (now - proj.startedAt) / PROJECTILE_DURATION_MS);
+    // Lower-clamped, not just upper — `now` can be a hair behind `startedAt` in rare timing edge
+    // cases (rAF timestamp semantics, clock-sync slop in online play), and an unclamped negative
+    // t here corrupts the scale math below into a negative radius, which crashes ctx.ellipse().
+    const t = Math.max(0, Math.min(1, (now - proj.startedAt) / PROJECTILE_DURATION_MS));
     const arcScale = Math.max(0.35, proj.radius / DEFAULT_MAX_RADIUS);
     const hop = Math.sin(t * Math.PI) * PROJECTILE_ARC_HEIGHT * arcScale * 0.4;
     // Travels in from each player's launch station rather than popping straight up —
@@ -317,7 +336,7 @@ function drawErasers(ctx: CanvasRenderingContext2D, session: GameSession, now: n
 
 function drawImpacts(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   for (const impact of session.impacts) {
-    const t = Math.min(1, (now - impact.at) / IMPACT_FLASH_MS);
+    const t = Math.max(0, Math.min(1, (now - impact.at) / IMPACT_FLASH_MS));
     const ringR = impact.radius * (0.9 + t * 1.4);
     ctx.save();
     ctx.globalAlpha = 0.5 * (1 - t);
@@ -500,7 +519,7 @@ function drawVelvetPanel(ctx: CanvasRenderingContext2D, x: number, w: number): v
 
 function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   const elapsed = now - session.stateEnteredAt;
-  const progress = Math.min(1, elapsed / CURTAIN_OPEN_MS);
+  const progress = Math.max(0, Math.min(1, elapsed / CURTAIN_OPEN_MS));
   const half = CANVAS_W / 2;
   const panelW = half * (1 - progress);
 
@@ -542,29 +561,16 @@ function drawRoundResults(ctx: CanvasRenderingContext2D, session: GameSession, n
     const idx = Math.max(0, Math.min(n - 1, Math.floor(elapsed / session.resultsPerOutlineMs)));
     const result = session.lastResults[idx]!;
     ctx.fillStyle = "#fff";
-    ctx.font = "bold 32px 'Segoe UI', sans-serif";
-    ctx.fillText(`Outline ${idx + 1} of ${n} — ${result.kind}`, CANVAS_W / 2, 130);
+    ctx.font = "bold 30px 'Segoe UI', sans-serif";
+    ctx.fillText(`Outline ${idx + 1} of ${n} — ${result.kind}`, CANVAS_W / 2, 90);
 
-    const sorted = [...result.ranking].sort((a, b) => b.pixels - a.pixels);
-    sorted.forEach((entry, row) => {
-      const player = session.players.find((p) => p.id === entry.playerId);
-      const y = 200 + row * 60;
-      ctx.fillStyle = player?.color ?? "#fff";
-      ctx.beginPath();
-      ctx.arc(CANVAS_W / 2 - 220, y - 8, 12, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.textAlign = "left";
-      ctx.font = "bold 22px 'Segoe UI', sans-serif";
-      ctx.fillText(player?.name ?? "?", CANVAS_W / 2 - 195, y);
-      ctx.font = "20px 'Segoe UI', sans-serif";
-      ctx.fillStyle = entry.pixels > 0 ? "#fff" : "rgba(255,255,255,0.5)";
-      ctx.fillText(`${entry.percent.toFixed(1)}% covered`, CANVAS_W / 2 - 30, y);
-      ctx.textAlign = "right";
-      ctx.fillStyle = entry.points > 0 ? "#ffd60a" : "rgba(255,255,255,0.5)";
-      ctx.font = "bold 22px 'Segoe UI', sans-serif";
-      ctx.fillText(`+${entry.points}`, CANVAS_W / 2 + 220, y);
-      ctx.textAlign = "center";
-    });
+    // The finale's 30-outline fast cycling is meant to blur past quickly — the shape-and-reveal
+    // treatment below needs real time to read, so only the normal (few-outline) rounds get it.
+    if (n > RESULTS_MANY_OUTLINES_THRESHOLD) {
+      drawResultsRankedList(ctx, session, result);
+    } else {
+      drawResultsShapeReveal(ctx, session, idx, elapsed);
+    }
 
     ctx.fillStyle = "rgba(255,255,255,0.6)";
     ctx.font = "16px 'Segoe UI', sans-serif";
@@ -581,6 +587,75 @@ function drawRoundResults(ctx: CanvasRenderingContext2D, session: GameSession, n
   ctx.fillStyle = "#fff";
   ctx.font = "18px 'Segoe UI', sans-serif";
   ctx.fillText(`Next round in ${secsLeft}s`, CANVAS_W / 2, CANVAS_H - 40);
+}
+
+/** The finale's fast-cycling fallback — today's original ranked list, kept simple since 30
+ * outlines fly by too quickly for the shape/reveal treatment to read anyway. */
+function drawResultsRankedList(ctx: CanvasRenderingContext2D, session: GameSession, result: OutlineResult): void {
+  const sorted = [...result.ranking].sort((a, b) => b.pixels - a.pixels);
+  sorted.forEach((entry, row) => {
+    const player = session.players.find((p) => p.id === entry.playerId);
+    const y = 200 + row * 60;
+    ctx.fillStyle = player?.color ?? "#fff";
+    ctx.beginPath();
+    ctx.arc(CANVAS_W / 2 - 220, y - 8, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.textAlign = "left";
+    ctx.font = "bold 22px 'Segoe UI', sans-serif";
+    ctx.fillText(player?.name ?? "?", CANVAS_W / 2 - 195, y);
+    ctx.textAlign = "right";
+    ctx.fillStyle = entry.points > 0 ? "#ffd60a" : "rgba(255,255,255,0.5)";
+    ctx.font = "bold 22px 'Segoe UI', sans-serif";
+    ctx.fillText(`+${entry.points}`, CANVAS_W / 2 + 220, y);
+    ctx.textAlign = "center";
+  });
+}
+
+/** Draws the outline's actual shape, scaled to a consistent display size regardless of its real
+ * in-round radius, then animates each scoring player's "+N" appearing just above it and flying
+ * upward — purely a function of elapsed time against session.revealTimeline, same pattern as
+ * every other animated effect in this file (impacts, projectiles, the curtain). */
+function drawResultsShapeReveal(ctx: CanvasRenderingContext2D, session: GameSession, outlineIndex: number, elapsed: number): void {
+  const outline = session.outlines[outlineIndex];
+  if (!outline) return;
+
+  const cx = CANVAS_W / 2;
+  const cy = RESULTS_SHAPE_CENTER_Y;
+  const scale = RESULTS_SHAPE_RADIUS / Math.max(1, outline.boundingRadius);
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  ctx.translate(-outline.cx, -outline.cy);
+  ctx.fillStyle = "rgba(255,255,255,0.14)";
+  ctx.fill(outline.path);
+  ctx.strokeStyle = "rgba(255,255,255,0.85)";
+  ctx.lineWidth = 3 / scale;
+  ctx.stroke(outline.path);
+  ctx.restore();
+
+  const startY = cy - RESULTS_SHAPE_RADIUS - 24;
+  const endY = 50;
+  for (const step of session.revealTimeline) {
+    if (step.outlineIndex !== outlineIndex) continue;
+    const t = (elapsed - step.atMs) / REVEAL_FLY_DURATION_MS;
+    if (t < 0 || t >= 1) continue;
+
+    const player = session.players.find((p) => p.id === step.playerId);
+    const popT = Math.min(1, t / 0.25);
+    const pop = 1 + 0.3 * Math.sin(popT * Math.PI);
+    const eased = t * t * (3 - 2 * t); // smoothstep — quick pop, then an easing shot upward
+    const y = startY - (startY - endY) * eased;
+    const alpha = t < 0.7 ? 1 : Math.max(0, 1 - (t - 0.7) / 0.3);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = player?.color ?? "#fff";
+    ctx.font = `bold ${Math.round(34 * pop)}px 'Segoe UI', sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(`+${step.points}`, cx, y);
+    ctx.restore();
+  }
 }
 
 function drawRoundTotals(ctx: CanvasRenderingContext2D, session: GameSession): void {

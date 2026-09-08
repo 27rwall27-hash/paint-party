@@ -72,6 +72,28 @@ export function playClaim(): void {
   tone(990, 0.08, 0.16, "square", 0.22);
 }
 
+/** A bright, airy chime the instant a power-up appears — distinct timbre from playClaim's
+ * electronic square-wave beeps, so "one just showed up" reads differently from "you got one". */
+export function playSpawn(): void {
+  tone(880, 0, 0.1, "sine", 0.18);
+  tone(1320, 0.05, 0.16, "sine", 0.16);
+}
+
+/** Round-results reveal cue, one per scoring rank — rank 0 (+3) is the most elaborate/exciting,
+ * rank 2 (+1) the simplest, matching how much of a big deal that placement is. */
+export function playPointReveal(rank: 0 | 1 | 2): void {
+  if (rank === 2) {
+    tone(700, 0, 0.12, "square", 0.22);
+  } else if (rank === 1) {
+    tone(700, 0, 0.1, "square", 0.2);
+    tone(950, 0.06, 0.14, "square", 0.24);
+  } else {
+    tone(700, 0, 0.09, "square", 0.2);
+    tone(950, 0.07, 0.1, "square", 0.22);
+    tone(1300, 0.14, 0.26, "triangle", 0.3);
+  }
+}
+
 /** Short countdown tick — plays once per second in the closing seconds of a round. */
 export function playTick(): void {
   tone(1500, 0, 0.06, "square", 0.22);

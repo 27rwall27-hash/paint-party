@@ -43,6 +43,8 @@ export function applySnapshot(session: GameSession, payload: SnapshotPayload): b
   session.erasers = payload.erasers;
   session.impacts = payload.impacts;
   session.lastResults = payload.lastResults;
+  session.revealTimeline = payload.revealTimeline;
+  session.revealedCount = payload.revealedCount;
 
   return roundChanged;
 }

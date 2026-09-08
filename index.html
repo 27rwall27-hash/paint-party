@@ -16,58 +16,6 @@
         <canvas id="game" width="1280" height="720"></canvas>
       </div>
 
-      <details id="settings">
-        <summary>Custom Audio (optional)</summary>
-        <p class="settingsHint">
-          Use your own audio for music/announcer instead of the built-in defaults: paste a
-          YouTube link, or upload a .wav (or other audio) file — an uploaded file always takes
-          priority over a YouTube link for that same slot. Leave everything blank to keep the
-          default. Changes apply from the next round. Volume sliders apply live and affect
-          whichever source is active (uploaded file, YouTube, or the built-in default).
-        </p>
-
-        <label>Background Music</label>
-        <div class="settingsRow">
-          <input id="musicUrl" type="text" placeholder="https://youtube.com/watch?v=..." />
-          <input id="musicFile" type="file" accept="audio/*" />
-          <button class="clearFileBtn" type="button" data-clear="music">Clear file</button>
-        </div>
-        <div class="volumeRow">
-          <label for="musicVolume">Volume</label>
-          <input id="musicVolume" type="range" min="0" max="100" value="35" />
-        </div>
-        <p class="audioSourceStatus" id="musicSourceStatus"></p>
-
-        <label>Round Start Announcer</label>
-        <div class="settingsRow">
-          <input id="startUrl" type="text" placeholder="https://youtube.com/watch?v=..." />
-          <input id="startFile" type="file" accept="audio/*" />
-          <button class="clearFileBtn" type="button" data-clear="start">Clear file</button>
-        </div>
-        <div class="volumeRow">
-          <label for="startVolume">Volume</label>
-          <input id="startVolume" type="range" min="0" max="100" value="50" />
-        </div>
-        <p class="audioSourceStatus" id="startSourceStatus"></p>
-
-        <label>Round Finished Announcer</label>
-        <div class="settingsRow">
-          <input id="finishUrl" type="text" placeholder="https://youtube.com/watch?v=..." />
-          <input id="finishFile" type="file" accept="audio/*" />
-          <button class="clearFileBtn" type="button" data-clear="finish">Clear file</button>
-        </div>
-        <div class="volumeRow">
-          <label for="finishVolume">Volume</label>
-          <input id="finishVolume" type="range" min="0" max="100" value="50" />
-        </div>
-        <p class="audioSourceStatus" id="finishSourceStatus"></p>
-
-        <div class="settingsActions">
-          <button id="saveAudioBtn" type="button">Save links</button>
-          <span id="audioSaveStatus"></span>
-        </div>
-      </details>
-
       <details id="online">
         <summary>Play Online (beta)</summary>
         <p class="settingsHint">
@@ -88,9 +36,6 @@
           <button id="onlineStartBtn" type="button" hidden>Start Match</button>
         </div>
       </details>
-
-      <div id="yt-music-mount" class="ytMount"></div>
-      <div id="yt-announce-mount" class="ytMount"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

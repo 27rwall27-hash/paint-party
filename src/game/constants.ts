@@ -51,6 +51,9 @@ export const GROW_RATE = 60; // px/sec while paint held (charging)
 export const MOVE_SPEED = 338; // px/sec (30% faster than the original 260)
 
 export const SPLAT_INTERVAL_MS = 60; // machine-gun auto-fire cadence
+// A very slight cap on manual release-to-fire spamming — still ~7 shots/sec at the limit, clearly
+// short of the machine gun's ~16.7/sec, so spamming stays viable without rivaling the power-up.
+export const MANUAL_FIRE_COOLDOWN_MS = 140;
 
 export const POWERUP_RADIUS = 16;
 export const POWERUP_CLAIM_SLACK = 6; // extra px of forgiveness when checking overlap
@@ -74,6 +77,7 @@ export const SWEEP_WIDTH = 46;
 export const SWEEP_BAND_HEIGHT = Math.round(CANVAS_H * 0.2);
 
 export const POWERUP_CLAIMED_FLASH_MS = 500;
+export const POWERUP_PULSE_MS = 600; // decaying "notice me" pulse right after a power-up spawns
 
 export const ROUND_INTRO_MS = 3000;
 export const CURTAIN_OPEN_MS = 1400; // portion of ROUND_INTRO_MS spent opening the curtain

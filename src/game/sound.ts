@@ -1,52 +1,27 @@
-// Director that sits between the game and three audio backends: an uploaded local file
-// (localAudio.ts), a user-supplied YouTube link (youtube.ts), or the built-in synthesized engine
-// (audio.ts) — in that priority order, per slot (music / round-start / round-finish).
+// Director that sits between the game and two audio sources per slot (music / round-start /
+// round-finish): a WAV file dropped into public/audio/ (see customAudio.ts), or the built-in
+// synthesized engine (audio.ts) as the fallback — no settings UI, nothing to configure.
 //
 // Music plays continuously for the whole game once it starts — it's never stopped/restarted
 // between rounds — and gets 5% faster (compounding) each round via setRoundSpeed().
 
 import * as audio from "./audio.ts";
-import { LocalAudioPlayer } from "./localAudio.ts";
-import { loadLocalBlobs, loadSettings, onSettingsChange, type AudioSettings } from "./settings.ts";
-import { announcePlayer, musicPlayer } from "./youtube.ts";
+import { loadCustomAudio, type CustomAudioSet } from "./customAudio.ts";
 
-let settings: AudioSettings = {
-  musicVideoId: null,
-  startVideoId: null,
-  finishVideoId: null,
-  musicBlob: null,
-  startBlob: null,
-  finishBlob: null,
-  musicVolume: 0.35,
-  startVolume: 0.5,
-  finishVolume: 0.5,
-};
+const DEFAULT_VOLUME = { music: 0.35, start: 0.5, finish: 0.5 };
+
+let custom: CustomAudioSet = { music: null, start: null, finish: null };
 let musicStarted = false;
-let musicBackend: "local" | "youtube" | "synth" = "synth";
-let roundSpeedMultiplier = 1;
-
-const localMusic = new LocalAudioPlayer();
-const localAnnounce = new LocalAudioPlayer();
-
-function applyMusicVolume(v: number): void {
-  audio.setMusicVolume(v);
-  localMusic.setVolume(v);
-  if (musicBackend === "youtube") void musicPlayer.setVolume(v * 100);
-}
 
 export function init(): void {
-  settings = loadSettings();
-  applyMusicVolume(settings.musicVolume);
-  onSettingsChange((next) => {
-    const musicVolumeChanged = next.musicVolume !== settings.musicVolume;
-    settings = next;
-    if (musicVolumeChanged) applyMusicVolume(settings.musicVolume);
-  });
-  // Uploaded files live in IndexedDB, which is async — pull them in as soon as they're ready
-  // (well before the first round ever needs them) rather than waiting for the settings UI to
-  // touch a file input.
-  void loadLocalBlobs().then((blobs) => {
-    settings = { ...settings, ...blobs };
+  void loadCustomAudio().then((loaded) => {
+    custom = loaded;
+    if (custom.music) {
+      custom.music.loop = true;
+      custom.music.volume = DEFAULT_VOLUME.music;
+    }
+    if (custom.start) custom.start.volume = DEFAULT_VOLUME.start;
+    if (custom.finish) custom.finish.volume = DEFAULT_VOLUME.finish;
   });
 }
 
@@ -56,14 +31,11 @@ export function unlock(): void {
 
 /** Fired the instant the curtain finishes opening — before the round timer actually starts. */
 export function announceRoundStart(): void {
-  if (settings.startBlob) {
-    localAnnounce.setVolume(settings.startVolume);
-    localAnnounce.playOnce(settings.startBlob, 4000);
-  } else if (settings.startVideoId) {
-    void announcePlayer.setVolume(settings.startVolume * 100);
-    void announcePlayer.playOnce(settings.startVideoId, 4000);
+  if (custom.start) {
+    custom.start.currentTime = 0;
+    void custom.start.play().catch(() => {});
   } else {
-    audio.announceStart(settings.startVolume);
+    audio.announceStart(DEFAULT_VOLUME.start);
   }
 }
 
@@ -73,21 +45,13 @@ export function announceRoundStart(): void {
  */
 export function startMusic(): void {
   if (musicStarted) {
-    if (musicBackend === "youtube") void musicPlayer.resume();
-    else if (musicBackend === "local") localMusic.resume();
+    if (custom.music) void custom.music.play().catch(() => {});
     return;
   }
   musicStarted = true;
-  if (settings.musicBlob) {
-    musicBackend = "local";
-    localMusic.setVolume(settings.musicVolume);
-    localMusic.playLooped(settings.musicBlob);
-  } else if (settings.musicVideoId) {
-    musicBackend = "youtube";
-    void musicPlayer.playLooped(settings.musicVideoId);
-    void musicPlayer.setVolume(settings.musicVolume * 100);
+  if (custom.music) {
+    void custom.music.play().catch(() => {});
   } else {
-    musicBackend = "synth";
     audio.startMusic();
   }
 }
@@ -97,30 +61,29 @@ export function startMusic(): void {
  * the ONLY thing that changes music tempo; nothing speeds it up mid-round.
  */
 export function setRoundSpeed(roundIndex: number): void {
-  roundSpeedMultiplier = 1.05 ** roundIndex;
-  if (musicBackend === "synth") audio.setTempoMultiplier(roundSpeedMultiplier);
-  else if (musicBackend === "youtube") void musicPlayer.setRate(roundSpeedMultiplier);
-  else if (musicBackend === "local") localMusic.setRate(roundSpeedMultiplier);
+  const multiplier = 1.05 ** roundIndex;
+  if (custom.music) custom.music.playbackRate = multiplier;
+  else audio.setTempoMultiplier(multiplier);
 }
 
 function playFinishCue(): void {
-  if (settings.finishBlob) {
-    localAnnounce.setVolume(settings.finishVolume);
-    localAnnounce.playOnce(settings.finishBlob, 3500);
-  } else if (settings.finishVideoId) {
-    void announcePlayer.setVolume(settings.finishVolume * 100);
-    void announcePlayer.playOnce(settings.finishVideoId, 3500);
+  if (custom.finish) {
+    custom.finish.currentTime = 0;
+    void custom.finish.play().catch(() => {});
   } else {
-    audio.announceFinish(settings.finishVolume);
+    audio.announceFinish(DEFAULT_VOLUME.finish);
   }
 }
 
 function stopMusicPlayback(): void {
-  if (musicBackend === "youtube") void musicPlayer.pause();
-  else if (musicBackend === "local") localMusic.pause();
-  else audio.stopMusic();
+  if (custom.music) {
+    custom.music.pause();
+    custom.music.currentTime = 0;
+    custom.music.playbackRate = 1;
+  } else {
+    audio.stopMusic();
+  }
   musicStarted = false;
-  roundSpeedMultiplier = 1;
 }
 
 /** Round-end beat: just the "Finish!" cue — music keeps going, unchanged tempo. */
@@ -160,4 +123,12 @@ export function playTick(): void {
 
 export function playCurtain(): void {
   audio.playCurtain();
+}
+
+export function playSpawn(): void {
+  audio.playSpawn();
+}
+
+export function playPointReveal(rank: 0 | 1 | 2): void {
+  audio.playPointReveal(rank);
 }

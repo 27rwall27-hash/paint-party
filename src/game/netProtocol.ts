@@ -3,7 +3,7 @@
 // side can import freely. Gameplay types (Player, Sweep, Projectile, Eraser, Impact, OutlineResult)
 // are reused as-is from the game modules — they're already plain, JSON-safe data shapes.
 
-import type { GameState, PaintEvent, Sweep, Projectile, Eraser, Impact } from "./GameSession.ts";
+import type { GameState, PaintEvent, RevealStep, Sweep, Projectile, Eraser, Impact } from "./GameSession.ts";
 import type { Player } from "./Player.ts";
 import type { PlayerInputState } from "./Input.ts";
 import type { PowerupState } from "./Outline.ts";
@@ -92,6 +92,8 @@ export interface SnapshotPayload {
   erasers: Eraser[];
   impacts: Impact[];
   lastResults: OutlineResult[];
+  revealTimeline: RevealStep[];
+  revealedCount: number;
 }
 
 /** Host -> all: paint actions from this broadcast interval, batched, so guests can replay them

@@ -21,6 +21,7 @@ import {
   LAST_CHANCE_MS,
   MACHINEGUN_DURATION_MS,
   MACHINEGUN_SHOT_RADIUS,
+  MANUAL_FIRE_COOLDOWN_MS,
   MIN_RADIUS,
   PLAYER_DEFS,
   POWERUP_CLAIM_SLACK,
@@ -75,6 +76,8 @@ export interface SoundHooks {
   playCurtain(): void;
   roundEnd(): void;
   finalRoundEnd(): void;
+  playSpawn(): void;
+  playPointReveal(rank: 0 | 1 | 2): void;
 }
 
 const noopSound: SoundHooks = {
@@ -90,6 +93,8 @@ const noopSound: SoundHooks = {
   playCurtain() {},
   roundEnd() {},
   finalRoundEnd() {},
+  playSpawn() {},
+  playPointReveal() {},
 };
 
 /** Emitted whenever an Outline's paint canvas actually changes, so a server can broadcast just
@@ -99,6 +104,19 @@ export type PaintEvent =
   | { kind: "rect"; outlineIndex: number; x: number; y: number; w: number; h: number; color: string }
   | { kind: "erase"; outlineIndex: number; x: number; y: number; radius: number; excludeColor: string }
   | { kind: "clear"; outlineIndex: number; color: string; fraction: number };
+
+/** One "+N points" reveal moment in a round-results sequence — `atMs` is relative to when
+ * ROUND_RESULTS was entered. Built once per round from the (already-known) scoring results, so
+ * both the score increment and the sound/visual cue can be triggered at exactly the right time
+ * without render.ts (or a network snapshot) needing to know anything beyond "what time is it". */
+export interface RevealStep {
+  atMs: number;
+  outlineIndex: number;
+  playerId: number;
+  points: number;
+  /** 0 = +3 (most exciting cue), 1 = +2, 2 = +1 — position within that outline's scorers. */
+  rank: 0 | 1 | 2;
+}
 
 export interface Sweep {
   ownerId: number;
@@ -150,6 +168,27 @@ function randomHeading(speed: number): { vx: number; vy: number } {
   return { vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed };
 }
 
+/** Builds the full round-results reveal sequence from already-computed results — each outline's
+ * scoring players (already sorted highest-points-first, since ranking mirrors pixel coverage
+ * order) get one evenly-spaced reveal step within that outline's slice of the results timeline. */
+function buildRevealTimeline(results: OutlineResult[], perOutlineMs: number): RevealStep[] {
+  const steps: RevealStep[] = [];
+  results.forEach((result, outlineIndex) => {
+    const scorers = result.ranking.filter((e) => e.points > 0);
+    const stepMs = perOutlineMs / Math.max(1, scorers.length);
+    scorers.forEach((entry, i) => {
+      steps.push({
+        atMs: outlineIndex * perOutlineMs + i * stepMs,
+        outlineIndex,
+        playerId: entry.playerId,
+        points: entry.points,
+        rank: Math.min(2, i) as 0 | 1 | 2,
+      });
+    });
+  });
+  return steps;
+}
+
 export class GameSession {
   players: Player[] = createPlayers();
   state: GameState = "MENU";
@@ -167,6 +206,10 @@ export class GameSession {
   lastResults: OutlineResult[] = [];
   resultsDurationMs = RESULTS_HOLD_MS;
   resultsPerOutlineMs = RESULTS_PER_OUTLINE_MS;
+  revealTimeline: RevealStep[] = [];
+  /** How many entries of revealTimeline have already fired (score applied, cue played) — also
+   * doubles as "index of the next one due", since the timeline is built already sorted by atMs. */
+  revealedCount = 0;
   private lastTickSecond = 0;
   private finalBurstTriggered = false;
 
@@ -204,6 +247,7 @@ export class GameSession {
         this.updatePlaying(dt, now, input);
         break;
       case "ROUND_RESULTS":
+        this.updateResults(now);
         if (now - this.stateEnteredAt >= this.resultsDurationMs) {
           if (this.roundIndex + 1 < ROUNDS.length) {
             this.beginRound(this.roundIndex + 1, now);
@@ -239,6 +283,8 @@ export class GameSession {
     this.finalBurstTriggered = false;
     resetForRound(this.players);
     this.lastResults = [];
+    this.revealTimeline = [];
+    this.revealedCount = 0;
     this.state = "ROUND_INTRO";
     this.stateEnteredAt = now;
     this.sound.setUrgent(false);
@@ -259,7 +305,12 @@ export class GameSession {
           this.fireProjectile(player, player.x, player.y, MACHINEGUN_SHOT_RADIUS, now);
         }
       } else if (player.wasPaintHeld && !playerInput.paint) {
-        this.fireProjectile(player, player.x, player.y, player.cursorRadius, now);
+        // A release inside the cooldown window is a "dry fire" — no splat, no sound — so rapid
+        // spam-clicking can't match or beat the machine gun power-up's fire rate.
+        if (now - player.lastSplatAt >= MANUAL_FIRE_COOLDOWN_MS) {
+          player.lastSplatAt = now;
+          this.fireProjectile(player, player.x, player.y, player.cursorRadius, now);
+        }
         player.cursorRadius = MIN_RADIUS;
       }
       player.wasPaintHeld = mgActive ? false : playerInput.paint;
@@ -303,7 +354,10 @@ export class GameSession {
         ...this.powerups.map((p) => ({ cx: p.cx, cy: p.cy, radius: p.radius })),
       ];
       const spawned = spawnOnePowerup(obstacles, now, "machinegun");
-      if (spawned) this.powerups.push(spawned);
+      if (spawned) {
+        this.powerups.push(spawned);
+        this.sound.playSpawn();
+      }
     }
   }
 
@@ -493,6 +547,7 @@ export class GameSession {
         this.powerups.push(spawned);
         this.powerupsRemaining--;
         this.nextPowerupSpawnAt = now + randRange(POWERUP_SPAWN_MIN_MS, POWERUP_SPAWN_MAX_MS);
+        this.sound.playSpawn();
       }
     }
   }
@@ -503,6 +558,8 @@ export class GameSession {
     this.resultsPerOutlineMs =
       n > RESULTS_MANY_OUTLINES_THRESHOLD ? Math.max(120, RESULTS_MANY_OUTLINES_TOTAL_MS / n) : RESULTS_PER_OUTLINE_MS;
     this.resultsDurationMs = n > 0 ? n * this.resultsPerOutlineMs + RESULTS_HOLD_MS : RESULTS_HOLD_MS;
+    this.revealTimeline = buildRevealTimeline(this.lastResults, this.resultsPerOutlineMs);
+    this.revealedCount = 0;
     this.state = "ROUND_RESULTS";
     this.stateEnteredAt = now;
     if (this.roundIndex === ROUNDS.length - 1) {
@@ -514,5 +571,18 @@ export class GameSession {
 
   visiblePowerups(now: number): Powerup[] {
     return this.powerups.filter((p) => p.state === "active" || now - p.claimedAt < POWERUP_CLAIMED_FLASH_MS);
+  }
+
+  /** Applies each reveal step's score bump and sound cue the moment its scheduled time arrives —
+   * scores build up live over the results sequence instead of all jumping at round-end. */
+  private updateResults(now: number): void {
+    const elapsed = now - this.stateEnteredAt;
+    while (this.revealedCount < this.revealTimeline.length && this.revealTimeline[this.revealedCount]!.atMs <= elapsed) {
+      const step = this.revealTimeline[this.revealedCount]!;
+      const player = this.players.find((p) => p.id === step.playerId);
+      if (player) player.score += step.points;
+      this.sound.playPointReveal(step.rank);
+      this.revealedCount++;
+    }
   }
 }

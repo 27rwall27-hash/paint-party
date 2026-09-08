@@ -121,6 +121,8 @@ export class HostGameLoop {
       erasers: this.session.erasers,
       impacts: this.session.impacts,
       lastResults: this.session.lastResults,
+      revealTimeline: this.session.revealTimeline,
+      revealedCount: this.session.revealedCount,
     };
     this.client.broadcastSnapshot(payload);
   }

@@ -3,7 +3,7 @@ import { Powerup, type PowerupSpec } from "./Outline.ts";
 import type { ShapeKind } from "./shapes.ts";
 
 const POWERUP_SHAPE: ShapeKind = "circle";
-const MARGIN = 30;
+const MARGIN = 60; // clear of the ~44px decorative picture frame, with real breathing room
 const MAX_ATTEMPTS = 60;
 
 export interface Obstacle {

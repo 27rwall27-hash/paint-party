@@ -3,13 +3,11 @@ import { GameSession } from "./game/GameSession.ts";
 import { InputManager } from "./game/Input.ts";
 import { render } from "./game/render.ts";
 import * as sound from "./game/sound.ts";
-import { initSettingsUI } from "./game/settings.ts";
 import { initOnlineUI } from "./game/onlineUI.ts";
 import { onlineMode, onlineNow } from "./game/onlineMode.ts";
 import { PLAYER_DEFS } from "./game/constants.ts";
 
 sound.init();
-initSettingsUI();
 initOnlineUI();
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
