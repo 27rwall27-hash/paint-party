@@ -83,13 +83,20 @@ export class HostGameLoop {
 
     this.session.update(dt, now, this.inputSource);
 
+    // Paint goes out every tick (30Hz), decoupled from the throttled full-snapshot broadcast
+    // below — a continuous effect like the sweep brush generates a rect event most ticks, and
+    // batching those at the same ~10Hz rate as the (much heavier) snapshot made painted trails
+    // visibly lag behind the smoothly-interpolated sweep bar itself for guests. Paint messages are
+    // small (a handful of {kind, outlineIndex, x, y, ...} objects), so the extra message volume is
+    // cheap next to the win in perceived responsiveness.
+    if (this.pendingPaint.length > 0) {
+      this.client.broadcastPaint({ events: this.pendingPaint });
+      this.pendingPaint = [];
+    }
+
     this.tickCount++;
     if (this.tickCount % BROADCAST_EVERY_N_TICKS === 0) {
       this.broadcastSnapshot(now);
-      if (this.pendingPaint.length > 0) {
-        this.client.broadcastPaint({ events: this.pendingPaint });
-        this.pendingPaint = [];
-      }
     }
   }
 
@@ -103,6 +110,7 @@ export class HostGameLoop {
       stateEnteredAt: this.session.stateEnteredAt,
       resultsDurationMs: this.session.resultsDurationMs,
       resultsPerOutlineMs: this.session.resultsPerOutlineMs,
+      resultsRevealEndMs: this.session.resultsRevealEndMs,
       outlineSpecs: cfg ? cfg.outlines.map((o): NetOutlineSpec => ({ ...o })) : [],
       players: this.session.players,
       powerups: this.session.powerups.map((p) => ({

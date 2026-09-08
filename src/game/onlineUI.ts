@@ -4,6 +4,8 @@ import { onlineMode, onlineNow } from "./onlineMode.ts";
 import { HostGameLoop } from "./hostLoop.ts";
 import { PredictedPlayer } from "./predictedPlayer.ts";
 import { RemoteInterpolator } from "./interpolation.ts";
+import { resetGuestSound, syncGuestSound } from "./guestSound.ts";
+import * as sound from "./sound.ts";
 import type { PresencePayload } from "./netProtocol.ts";
 
 export function initOnlineUI(): void {
@@ -40,6 +42,7 @@ export function initOnlineUI(): void {
     onlineMode.role = "guest";
     onlineMode.sendInput = (state) => client?.sendInput(state);
     onlineMode.active = true;
+    resetGuestSound();
   }
 
   function beginHostSession(c: NetworkClient): void {
@@ -69,6 +72,11 @@ export function initOnlineUI(): void {
   joinBtn.addEventListener("click", () => {
     const code = joinCodeInput.value.trim();
     if (!code) return;
+    // Guests never press a local "paint" key to unlock audio the way MENU->beginRound does for
+    // host/local play (a guest's session never runs its own GameSession.update() — see
+    // guestSound.ts) — this click is the one real user gesture in the whole join flow, so it's
+    // the only place left to satisfy the browser's autoplay policy for a guest's audio.
+    sound.unlock();
     statusEl.textContent = "Connecting…";
     try {
       const c = new NetworkClient();
@@ -92,6 +100,7 @@ export function initOnlineUI(): void {
           onlineMode.clockOffset === undefined ? offsetSample : onlineMode.clockOffset * 0.8 + offsetSample * 0.2;
 
         const roundChanged = applySnapshot(onlineMode.session, payload);
+        syncGuestSound(payload);
         if (onlineMode.mySlot !== undefined) {
           const authoritative = payload.players[onlineMode.mySlot];
           if (authoritative) {

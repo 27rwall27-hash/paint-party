@@ -80,6 +80,7 @@ export interface SnapshotPayload {
   stateEnteredAt: number;
   resultsDurationMs: number;
   resultsPerOutlineMs: number;
+  resultsRevealEndMs: number;
   /** Always included (cheap — a handful of small objects) rather than only on round change, so a
    * guest whose join is still settling right as a round starts can't miss it and end up with no
    * outlines for the rest of that round. Guests decide for themselves whether to rebuild their

@@ -677,7 +677,7 @@ function drawConfetti(ctx: CanvasRenderingContext2D, elapsed: number): void {
 const ANNOUNCE_FLASH_MS = 900;
 const ANNOUNCE_POP_MS = 180;
 const ANNOUNCE_FADE_MS = 250;
-const ANNOUNCE_COLOR = "#8b0000"; // deep red
+const ANNOUNCE_COLOR = "#ff3d9a"; // pink
 
 /** Big "START!"/"FINISH!" text flashed across the board right as the announcer says it — a quick
  * pop in, a hold, then a fade out, purely a function of elapsed time since the state that cue

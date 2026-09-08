@@ -1,5 +1,6 @@
 import { GameSession } from "./GameSession.ts";
 import { Outline, Powerup } from "./Outline.ts";
+import * as sound from "./sound.ts";
 import type { PaintBatchPayload, SnapshotPayload } from "./netProtocol.ts";
 
 /** A GameSession driven entirely by host snapshots rather than its own update() loop — render.ts
@@ -23,6 +24,7 @@ export function applySnapshot(session: GameSession, payload: SnapshotPayload): b
   session.stateEnteredAt = payload.stateEnteredAt;
   session.resultsDurationMs = payload.resultsDurationMs;
   session.resultsPerOutlineMs = payload.resultsPerOutlineMs;
+  session.resultsRevealEndMs = payload.resultsRevealEndMs;
   if (roundChanged) {
     session.outlines = payload.outlineSpecs.map((spec) => new Outline(spec));
   }
@@ -55,7 +57,12 @@ export function applyPaint(session: GameSession, payload: PaintBatchPayload): vo
   for (const event of payload.events) {
     const outline = session.outlines[event.outlineIndex];
     if (!outline) continue;
-    if (event.kind === "splat") outline.paintSplat(event.x, event.y, event.radius, event.color);
+    if (event.kind === "splat") {
+      outline.paintSplat(event.x, event.y, event.radius, event.color);
+      // Mirrors landProjectile's playSplat() on the host — a splat PaintEvent only ever exists
+      // because a blob just landed there, so the two are exactly equivalent, no guessing needed.
+      sound.playSplat();
+    }
     else if (event.kind === "rect") outline.paintRect(event.x, event.y, event.w, event.h, event.color);
     else if (event.kind === "erase") outline.eraseColor(event.x, event.y, event.radius, event.excludeColor);
     else if (event.kind === "clear") outline.clearOtherColors(event.color, event.fraction);
