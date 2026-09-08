@@ -80,16 +80,17 @@ export const POWERUP_CLAIMED_FLASH_MS = 500;
 export const POWERUP_PULSE_PERIOD_MS = 900; // continuous "notice me" pulse for as long as it's on screen
 export const POWERUP_AURA_MS = 500; // one-time bright shine ring right when it spawns
 
-// Between-round curtain: it sits fully closed for CURTAIN_HOLD_MS before it starts opening again,
-// so a round's close and the next round's open read as two distinct theatrical beats rather than
-// an instant close-then-reopen cut. ROUND_INTRO_MS is padded by that same hold so the countdown
-// afterward keeps the same on-screen duration it always had.
-export const CURTAIN_HOLD_MS = 700;
-export const ROUND_INTRO_MS = 3700;
-export const CURTAIN_OPEN_MS = 1400; // portion of ROUND_INTRO_MS (after CURTAIN_HOLD_MS) spent opening
-export const CURTAIN_CLOSE_MS = 1200; // tail of RESULTS_HOLD_MS spent closing before the next reveal
+// Between-round sequence, in order: score tallying happens with the curtain still open (see
+// RESULTS_TALLY_DELAY_MS/RESULTS_PER_OUTLINE_MS below) — once that finishes the curtain closes
+// (CURTAIN_CLOSE_MS), a leaderboard holds on the closed curtain (RESULTS_LEADERBOARD_MS) then
+// clears, the closed curtain then shows just the round number (ROUND_NUMBER_MS), and finally it
+// opens (CURTAIN_OPEN_MS) straight into the next round — no countdown, no extra dwell once open.
+export const CURTAIN_CLOSE_MS = 1200;
+export const RESULTS_LEADERBOARD_MS = 1800;
+export const ROUND_NUMBER_MS = 1300;
+export const CURTAIN_OPEN_MS = 1400;
+export const ROUND_INTRO_MS = ROUND_NUMBER_MS + CURTAIN_OPEN_MS;
 export const RESULTS_PER_OUTLINE_MS = 3100; // was 2600 — +500ms more pacing between each point reveal
-export const RESULTS_HOLD_MS = 2200;
 // A beat of silence after the "Finish!" cue before the score tallying starts — normal rounds only,
 // deliberately not applied to the finale's fast many-outline path below (its timing must stay put).
 export const RESULTS_TALLY_DELAY_MS = 1500;

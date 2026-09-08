@@ -92,12 +92,6 @@ export const ROUNDS: RoundConfig[] = [
     durationMs: 34000,
   },
   {
-    outlines: [nextSlot("circle", 380, CY, 188, 1.25), nextSlot("circle", 900, CY, 188, 1.25)],
-    powerupCountRange: [2, 4],
-    concurrentPowerups: 2,
-    durationMs: 32000,
-  },
-  {
     // A straight 2x2 grid was the most boring layout in the game — swapped for a wide zigzag so
     // the four targets are staggered instead of aligned, and sized up like everything else.
     outlines: [

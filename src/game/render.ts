@@ -2,7 +2,6 @@ import {
   CANVAS_H,
   CANVAS_W,
   CURTAIN_CLOSE_MS,
-  CURTAIN_HOLD_MS,
   CURTAIN_OPEN_MS,
   DEFAULT_MAX_RADIUS,
   GUN_BASE_Y,
@@ -16,8 +15,8 @@ import {
   PROJECTILE_ARC_HEIGHT,
   PROJECTILE_DURATION_MS,
   PROJECTILE_MIN_SCALE,
-  RESULTS_HOLD_MS,
-  ROUND_INTRO_MS,
+  RESULTS_LEADERBOARD_MS,
+  ROUND_NUMBER_MS,
   TICK_WINDOW_MS,
   VICTORY_CURTAIN_HOLD_MS,
   VICTORY_CURTAIN_OPEN_MS,
@@ -97,19 +96,27 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
   drawPaintGuns(ctx, session);
   drawCursors(ctx, session, now);
 
-  if (session.state === "ROUND_RESULTS") drawRoundResults(ctx, session, now);
+  // The point-reveal ("+N") draws while the board is still fully visible, before the curtain has
+  // any part in this state — everything after that (the closing curtain and what's shown on it)
+  // has to be drawn after drawFrame() below so it covers the frame too, not just the canvas.
+  if (session.state === "ROUND_RESULTS") drawResultsReveal(ctx, session, now);
   if (session.state === "GAME_OVER") drawGameOver(ctx, session);
 
   drawFrame(ctx);
 
   if (session.state === "ROUND_INTRO") drawCurtain(ctx, session, now);
+  if (session.state === "ROUND_RESULTS") drawResultsCurtain(ctx, session, now);
 
   updateDomHud(session, now);
 }
 
-/** Thick, ornate gallery picture frame around the whole canvas — HUD lives outside it, in the DOM. */
+/** Thick, ornate gallery picture frame around the whole canvas — HUD lives outside it, in the DOM.
+ * FRAME_THICKNESS is shared with drawCurtainPanels so a closed/closing curtain always covers
+ * exactly this same border, never leaving a sliver of frame visible past its edge. */
+const FRAME_THICKNESS = 44;
+
 function drawFrame(ctx: CanvasRenderingContext2D): void {
-  const outer = 44;
+  const outer = FRAME_THICKNESS;
   ctx.save();
 
   const grad = ctx.createLinearGradient(0, 0, outer, outer);
@@ -571,7 +578,9 @@ function drawVelvetPanel(ctx: CanvasRenderingContext2D, x: number, w: number): v
 /** Draws the velvet side panels at a given "how closed" amount (0 = fully open/no panel, 1 =
  * fully closed/meeting in the middle) — shared by the round-intro opening, the results-screen
  * closing tail, and the victory reveal's opening, so the motion is visually continuous across all
- * three (a close always ends exactly where the next open begins). */
+ * three (a close always ends exactly where the next open begins). Always called after drawFrame()
+ * and sized to FRAME_THICKNESS on every edge, so the curtain fully masks the picture frame too —
+ * not just the inner canvas — everywhere it's used. */
 function drawCurtainPanels(ctx: CanvasRenderingContext2D, closedAmount: number): void {
   const half = CANVAS_W / 2;
   const panelW = half * Math.max(0, Math.min(1, closedAmount));
@@ -582,30 +591,36 @@ function drawCurtainPanels(ctx: CanvasRenderingContext2D, closedAmount: number):
 
   ctx.save();
   ctx.fillStyle = "#3a2312";
-  ctx.fillRect(0, 0, CANVAS_W, 24);
+  ctx.fillRect(0, 0, CANVAS_W, FRAME_THICKNESS);
+  ctx.fillRect(0, CANVAS_H - FRAME_THICKNESS, CANVAS_W, FRAME_THICKNESS);
   ctx.restore();
 }
 
+/** The closed curtain shows just the round number (fading in, holding, fading out — no countdown)
+ * for ROUND_NUMBER_MS, then opens over CURTAIN_OPEN_MS straight into the round with nothing drawn
+ * over it — PLAYING (and the "Start!" cue) begins right as the curtain finishes opening. */
 function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   const elapsed = now - session.stateEnteredAt;
-  // Sits fully closed for CURTAIN_HOLD_MS — a deliberate theatrical beat — before it starts to
-  // open; the "Round N" text below is still shown throughout, closed curtain included.
-  const progress = Math.max(0, Math.min(1, (elapsed - CURTAIN_HOLD_MS) / CURTAIN_OPEN_MS));
+  const progress = Math.max(0, Math.min(1, (elapsed - ROUND_NUMBER_MS) / CURTAIN_OPEN_MS));
   drawCurtainPanels(ctx, 1 - progress);
 
-  const secsLeft = Math.max(0, Math.ceil((ROUND_INTRO_MS - elapsed) / 1000));
+  if (elapsed < ROUND_NUMBER_MS) {
+    const fadeMs = 250;
+    let alpha = 1;
+    if (elapsed < fadeMs) alpha = elapsed / fadeMs;
+    else if (elapsed > ROUND_NUMBER_MS - fadeMs) alpha = Math.max(0, (ROUND_NUMBER_MS - elapsed) / fadeMs);
 
-  ctx.save();
-  ctx.textAlign = "center";
-  const boxW = 620;
-  ctx.fillStyle = "rgba(20,17,24,0.55)";
-  ctx.fillRect(CANVAS_W / 2 - boxW / 2, CANVAS_H / 2 - 100, boxW, 190);
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 46px 'Segoe UI', sans-serif";
-  ctx.fillText(`Round ${session.roundIndex + 1}`, CANVAS_W / 2, CANVAS_H / 2 - 30);
-  ctx.font = "bold 70px 'Segoe UI', sans-serif";
-  ctx.fillText(String(secsLeft || 1), CANVAS_W / 2, CANVAS_H / 2 + 60);
-  ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = "center";
+    ctx.font = "bold 64px 'Segoe UI', sans-serif";
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "rgba(20,17,24,0.6)";
+    ctx.strokeText(`Round ${session.roundIndex + 1}`, CANVAS_W / 2, CANVAS_H / 2 + 20);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(`Round ${session.roundIndex + 1}`, CANVAS_W / 2, CANVAS_H / 2 + 20);
+    ctx.restore();
+  }
 }
 
 const CONFETTI_COUNT = 60;
@@ -648,32 +663,31 @@ function drawConfetti(ctx: CanvasRenderingContext2D, elapsed: number): void {
   }
 }
 
-function drawRoundResults(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
+/** Phase 1 of ROUND_RESULTS: the in-place "+N" point reveal, drawn while the board is still fully
+ * visible (called before drawFrame/the curtain — see render()). A no-op once the reveal phase is
+ * over (session.resultsRevealEndMs), so this and drawResultsCurtain never draw at the same time. */
+function drawResultsReveal(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   const elapsed = now - session.stateEnteredAt;
-  const n = session.lastResults.length;
-  // Derived from resultsDurationMs (rather than n * resultsPerOutlineMs directly) so it correctly
-  // accounts for the normal-round tally delay folded into that duration — the finale has none, so
-  // this is numerically identical to the old formula there.
-  const cycleEnd = session.resultsDurationMs - RESULTS_HOLD_MS;
-
+  if (session.lastResults.length === 0 || elapsed >= session.resultsRevealEndMs) return;
   ctx.textAlign = "center";
+  drawResultsInPlaceReveal(ctx, session, elapsed);
+}
 
-  if (n === 0 || elapsed >= cycleEnd) {
-    drawPanel(ctx, 0.78);
-    drawRoundTotals(ctx, session);
-  } else {
-    // No overlay here — the board (outlines, paint, frame) is already fully drawn earlier this
-    // frame; the point reveal just floats small "+N" text above each outline right where it
-    // actually sits, in that player's color, as its turn in the timeline comes up.
-    drawResultsInPlaceReveal(ctx, session, elapsed);
-  }
+/** Phase 2+3 of ROUND_RESULTS, drawn after drawFrame so it covers the frame too: the curtain
+ * closes (CURTAIN_CLOSE_MS) once the reveal is done, then a leaderboard holds on the fully closed
+ * curtain (RESULTS_LEADERBOARD_MS) before this state ends — the next state (round intro, or
+ * victory after the finale) picks up from that same closed curtain. */
+function drawResultsCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
+  const elapsed = now - session.stateEnteredAt;
+  const revealEnd = session.resultsRevealEndMs;
+  if (elapsed < revealEnd) return;
 
-  // The curtain closes over the last stretch of the results screen, ending fully closed exactly
-  // when this state ends — the next screen (round intro, or the victory reveal after the finale)
-  // opens from there, so the motion reads as one continuous close-then-open, not two cuts.
-  const closeStart = session.resultsDurationMs - CURTAIN_CLOSE_MS;
-  if (elapsed >= closeStart) {
-    drawCurtainPanels(ctx, (elapsed - closeStart) / CURTAIN_CLOSE_MS);
+  const closeProgress = Math.max(0, Math.min(1, (elapsed - revealEnd) / CURTAIN_CLOSE_MS));
+  drawCurtainPanels(ctx, closeProgress);
+
+  const leaderboardElapsed = elapsed - revealEnd - CURTAIN_CLOSE_MS;
+  if (leaderboardElapsed >= 0 && leaderboardElapsed < RESULTS_LEADERBOARD_MS) {
+    drawResultsLeaderboard(ctx, session, leaderboardElapsed);
   }
 }
 
@@ -730,45 +744,53 @@ function drawResultsInPlaceReveal(ctx: CanvasRenderingContext2D, session: GameSe
   }
 }
 
-function drawRoundTotals(ctx: CanvasRenderingContext2D, session: GameSession): void {
+const LEADERBOARD_FADE_MS = 250;
+
+/** The standings, shown on the fully closed curtain between rounds — fades in, holds, fades out.
+ * The finale keeps the standings a secret right up to the "Player X Wins!" reveal, so it shows the
+ * same vague suspense message it always has instead of real scores for that one round. */
+function drawResultsLeaderboard(ctx: CanvasRenderingContext2D, session: GameSession, elapsed: number): void {
+  let alpha = 1;
+  if (elapsed < LEADERBOARD_FADE_MS) alpha = elapsed / LEADERBOARD_FADE_MS;
+  else if (elapsed > RESULTS_LEADERBOARD_MS - LEADERBOARD_FADE_MS) {
+    alpha = Math.max(0, (RESULTS_LEADERBOARD_MS - elapsed) / LEADERBOARD_FADE_MS);
+  }
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.textAlign = "center";
   ctx.fillStyle = "#fff";
   ctx.font = "bold 36px 'Segoe UI', sans-serif";
 
-  // The finale keeps the standings a secret right up to the "Player X Wins!" reveal — showing
-  // real totals here would spoil it, so this stays deliberately vague for that one round.
   if (session.roundIndex === ROUNDS.length - 1) {
     ctx.fillText("Final Scores Are In...", CANVAS_W / 2, 130);
     ctx.font = "22px 'Segoe UI', sans-serif";
     ctx.fillStyle = "rgba(255,255,255,0.75)";
     ctx.fillText("The results are revealed after the curtain falls.", CANVAS_W / 2, 190);
+    ctx.restore();
     return;
   }
 
-  ctx.fillText("Round Total", CANVAS_W / 2, 130);
+  ctx.fillText("Leaderboard", CANVAS_W / 2, 130);
 
-  const totals = session.players.map((p) => {
-    const gained = session.lastResults.reduce(
-      (sum, r) => sum + (r.ranking.find((e) => e.playerId === p.id)?.points ?? 0),
-      0,
-    );
-    return { player: p, gained };
-  });
-  totals.sort((a, b) => b.gained - a.gained);
-
-  totals.forEach(({ player, gained }, i) => {
-    const y = 210 + i * 54;
+  const sorted = [...session.players].sort((a, b) => b.score - a.score);
+  const topScore = sorted[0]?.score ?? 0;
+  sorted.forEach((player, i) => {
+    const isLeader = topScore > 0 && player.score === topScore;
+    const y = 210 + i * 60;
     ctx.fillStyle = player.color;
-    ctx.font = "bold 26px 'Segoe UI', sans-serif";
-    ctx.fillText(`${player.name}  +${gained}  (${player.score} total)`, CANVAS_W / 2, y);
+    ctx.font = `bold ${isLeader ? 30 : 26}px 'Segoe UI', sans-serif`;
+    ctx.fillText(`${isLeader ? "\u{1F451} " : ""}${player.name}  ${player.score} pts`, CANVAS_W / 2, y);
   });
+  ctx.restore();
 }
 
 /** A longer, drum-roll-backed hold with the curtain fully closed, then a slower open (both longer
  * than a normal round-intro's) onto a "Player X Wins!" reveal in the winner's color, with
  * continuous confetti for as long as this screen is up — the dramatic payoff for the finale's
- * hidden scoreboard. The confetti and text are drawn *before* the curtain panels, so the curtain
- * genuinely masks them until it opens — nothing is visible ahead of the reveal. Falls through into
- * the existing final-scores screen after. */
+ * hidden scoreboard. The text is a stage-style reveal: an outlined, color-filled headline under a
+ * soft radial spotlight, not a dimmed banner — drawn *before* the curtain panels, so the curtain
+ * genuinely masks it until it opens. Falls through into the existing final-scores screen after. */
 function drawVictory(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   const elapsed = now - session.stateEnteredAt;
   const revealElapsed = Math.max(0, elapsed - VICTORY_CURTAIN_HOLD_MS);
@@ -783,11 +805,23 @@ function drawVictory(ctx: CanvasRenderingContext2D, session: GameSession, now: n
     winners.length > 1 ? `${winners.map((p) => p.name).join(" & ")} Win!` : `${winners[0]?.name ?? "?"} Wins!`;
 
   ctx.save();
+  // A dark vignette with a bright pool left uncovered in the middle reads as an actual stage
+  // spotlight (dims everything but the text) rather than a faint glow — a plain white glow was
+  // nearly invisible against the light canvas background underneath.
+  const spotlightY = CANVAS_H / 2 + 10;
+  const vignette = ctx.createRadialGradient(CANVAS_W / 2, spotlightY, 40, CANVAS_W / 2, spotlightY, 480);
+  vignette.addColorStop(0, "rgba(10,8,16,0)");
+  vignette.addColorStop(0.45, "rgba(10,8,16,0.35)");
+  vignette.addColorStop(1, "rgba(10,8,16,0.82)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
   ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(20,17,24,0.4)";
-  ctx.fillRect(0, CANVAS_H / 2 - 90, CANVAS_W, 180);
+  ctx.font = "bold 66px 'Segoe UI', sans-serif";
+  ctx.lineWidth = 7;
+  ctx.strokeStyle = "#1a1520";
+  ctx.strokeText(text, CANVAS_W / 2, CANVAS_H / 2 + 22);
   ctx.fillStyle = winnerColor;
-  ctx.font = "bold 64px 'Segoe UI', sans-serif";
   ctx.fillText(text, CANVAS_W / 2, CANVAS_H / 2 + 22);
   ctx.restore();
 

@@ -4,6 +4,7 @@ import {
   CANVAS_W,
   CLEAR_FRACTION,
   CONFUSE_DURATION_MS,
+  CURTAIN_CLOSE_MS,
   ERASER_DURATION_MS,
   ERASER_RADIUS,
   ERASER_REDIRECT_MS,
@@ -29,7 +30,7 @@ import {
   POWERUP_SPAWN_MAX_MS,
   POWERUP_SPAWN_MIN_MS,
   PROJECTILE_DURATION_MS,
-  RESULTS_HOLD_MS,
+  RESULTS_LEADERBOARD_MS,
   RESULTS_MANY_OUTLINES_THRESHOLD,
   RESULTS_MANY_OUTLINES_TOTAL_MS,
   RESULTS_PER_OUTLINE_MS,
@@ -219,8 +220,11 @@ export class GameSession {
   erasers: Eraser[] = [];
   impacts: Impact[] = [];
   lastResults: OutlineResult[] = [];
-  resultsDurationMs = RESULTS_HOLD_MS;
+  resultsDurationMs = 0;
   resultsPerOutlineMs = RESULTS_PER_OUTLINE_MS;
+  /** How far into ROUND_RESULTS the point-reveal phase runs before the curtain starts closing —
+   * render.ts uses this to know when to switch from drawing the in-place reveal to the curtain. */
+  resultsRevealEndMs = 0;
   revealTimeline: RevealStep[] = [];
   /** How many entries of revealTimeline have already fired (score applied, cue played) — also
    * doubles as "index of the next one due", since the timeline is built already sorted by atMs. */
@@ -319,6 +323,7 @@ export class GameSession {
     this.lastResults = [];
     this.revealTimeline = [];
     this.revealedCount = 0;
+    this.resultsRevealEndMs = 0;
     this.state = "ROUND_INTRO";
     this.stateEnteredAt = now;
     this.sound.setUrgent(false);
@@ -596,7 +601,10 @@ export class GameSession {
     // The finale's fast many-outline reveal is intentionally left exactly as it was — the tally
     // delay is a normal-round-only pause between the "Finish!" cue and the score reveal starting.
     const tallyDelayMs = manyOutlines ? 0 : RESULTS_TALLY_DELAY_MS;
-    this.resultsDurationMs = n > 0 ? tallyDelayMs + n * this.resultsPerOutlineMs + RESULTS_HOLD_MS : RESULTS_HOLD_MS;
+    this.resultsRevealEndMs = n > 0 ? tallyDelayMs + n * this.resultsPerOutlineMs : 0;
+    // After the reveal: curtain closes, a leaderboard holds on the closed curtain, then it's gone
+    // — the next state (round intro, or victory after the finale) picks up from a closed curtain.
+    this.resultsDurationMs = this.resultsRevealEndMs + CURTAIN_CLOSE_MS + RESULTS_LEADERBOARD_MS;
     this.revealTimeline = buildRevealTimeline(this.lastResults, this.resultsPerOutlineMs, tallyDelayMs);
     this.revealedCount = 0;
     this.state = "ROUND_RESULTS";
