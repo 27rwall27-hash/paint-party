@@ -80,18 +80,29 @@ export const POWERUP_CLAIMED_FLASH_MS = 500;
 export const POWERUP_PULSE_PERIOD_MS = 900; // continuous "notice me" pulse for as long as it's on screen
 export const POWERUP_AURA_MS = 500; // one-time bright shine ring right when it spawns
 
-export const ROUND_INTRO_MS = 3000;
-export const CURTAIN_OPEN_MS = 1400; // portion of ROUND_INTRO_MS (or VICTORY_MS) spent opening
+// Between-round curtain: it sits fully closed for CURTAIN_HOLD_MS before it starts opening again,
+// so a round's close and the next round's open read as two distinct theatrical beats rather than
+// an instant close-then-reopen cut. ROUND_INTRO_MS is padded by that same hold so the countdown
+// afterward keeps the same on-screen duration it always had.
+export const CURTAIN_HOLD_MS = 700;
+export const ROUND_INTRO_MS = 3700;
+export const CURTAIN_OPEN_MS = 1400; // portion of ROUND_INTRO_MS (after CURTAIN_HOLD_MS) spent opening
 export const CURTAIN_CLOSE_MS = 1200; // tail of RESULTS_HOLD_MS spent closing before the next reveal
-export const RESULTS_PER_OUTLINE_MS = 2600; // paced for a 750ms hold + 550ms float-to-HUD per point
+export const RESULTS_PER_OUTLINE_MS = 3100; // was 2600 — +500ms more pacing between each point reveal
 export const RESULTS_HOLD_MS = 2200;
+// A beat of silence after the "Finish!" cue before the score tallying starts — normal rounds only,
+// deliberately not applied to the finale's fast many-outline path below (its timing must stay put).
+export const RESULTS_TALLY_DELAY_MS = 1500;
 // Rounds with more outlines than this reveal much faster so a 30-outline finale doesn't drag on.
 export const RESULTS_MANY_OUTLINES_THRESHOLD = 10;
 export const RESULTS_MANY_OUTLINES_TOTAL_MS = 6500;
 
-// The "Player X Wins!" reveal after the finale's results — curtain opens (CURTAIN_OPEN_MS) into
-// it, holds with continuous confetti for the rest, then the existing final-scores screen takes over.
-export const VICTORY_MS = 4500;
+// The "Player X Wins!" reveal after the finale's results: a longer, drum-roll-backed curtain hold
+// and a slower open than a normal between-round transition, to build extra suspense — then holds
+// open with continuous confetti for the rest, before the existing final-scores screen takes over.
+export const VICTORY_CURTAIN_HOLD_MS = 1800;
+export const VICTORY_CURTAIN_OPEN_MS = 2200;
+export const VICTORY_MS = 7100;
 
 export const DEFAULT_POINTS_BY_RANK = [3, 2, 1, 0];
 export const FINALE_POINTS_BY_RANK = [1, 0.5, 0.25, 0];

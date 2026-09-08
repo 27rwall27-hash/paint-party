@@ -2,6 +2,7 @@ import {
   CANVAS_H,
   CANVAS_W,
   CURTAIN_CLOSE_MS,
+  CURTAIN_HOLD_MS,
   CURTAIN_OPEN_MS,
   DEFAULT_MAX_RADIUS,
   GUN_BASE_Y,
@@ -15,8 +16,11 @@ import {
   PROJECTILE_ARC_HEIGHT,
   PROJECTILE_DURATION_MS,
   PROJECTILE_MIN_SCALE,
+  RESULTS_HOLD_MS,
   ROUND_INTRO_MS,
   TICK_WINDOW_MS,
+  VICTORY_CURTAIN_HOLD_MS,
+  VICTORY_CURTAIN_OPEN_MS,
 } from "./constants.ts";
 import type { GameSession } from "./GameSession.ts";
 import type { Powerup } from "./Outline.ts";
@@ -74,6 +78,16 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
     return;
   }
 
+  // The victory reveal is deliberately its own clean scene — not the finale's frozen board with a
+  // banner pasted over it — so it skips every board-drawing call above and starts from the same
+  // blank textured background this function already painted, behind a closed curtain.
+  if (session.state === "VICTORY") {
+    drawFrame(ctx);
+    drawVictory(ctx, session, now);
+    updateDomHud(session, now);
+    return;
+  }
+
   drawOutlines(ctx, session);
   drawPowerups(ctx, session, now);
   drawSweeps(ctx, session, now);
@@ -89,7 +103,6 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
   drawFrame(ctx);
 
   if (session.state === "ROUND_INTRO") drawCurtain(ctx, session, now);
-  if (session.state === "VICTORY") drawVictory(ctx, session, now);
 
   updateDomHud(session, now);
 }
@@ -575,7 +588,9 @@ function drawCurtainPanels(ctx: CanvasRenderingContext2D, closedAmount: number):
 
 function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   const elapsed = now - session.stateEnteredAt;
-  const progress = Math.max(0, Math.min(1, elapsed / CURTAIN_OPEN_MS));
+  // Sits fully closed for CURTAIN_HOLD_MS — a deliberate theatrical beat — before it starts to
+  // open; the "Round N" text below is still shown throughout, closed curtain included.
+  const progress = Math.max(0, Math.min(1, (elapsed - CURTAIN_HOLD_MS) / CURTAIN_OPEN_MS));
   drawCurtainPanels(ctx, 1 - progress);
 
   const secsLeft = Math.max(0, Math.ceil((ROUND_INTRO_MS - elapsed) / 1000));
@@ -636,7 +651,10 @@ function drawConfetti(ctx: CanvasRenderingContext2D, elapsed: number): void {
 function drawRoundResults(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   const elapsed = now - session.stateEnteredAt;
   const n = session.lastResults.length;
-  const cycleEnd = n * session.resultsPerOutlineMs;
+  // Derived from resultsDurationMs (rather than n * resultsPerOutlineMs directly) so it correctly
+  // accounts for the normal-round tally delay folded into that duration — the finale has none, so
+  // this is numerically identical to the old formula there.
+  const cycleEnd = session.resultsDurationMs - RESULTS_HOLD_MS;
 
   ctx.textAlign = "center";
 
@@ -745,15 +763,18 @@ function drawRoundTotals(ctx: CanvasRenderingContext2D, session: GameSession): v
   });
 }
 
-/** The curtain opens (same motion/timing as a round intro) into a "Player X Wins!" reveal in the
- * winner's color, with continuous confetti for as long as this screen is up — the dramatic payoff
- * for the finale's hidden scoreboard. Falls through into the existing final-scores screen after. */
+/** A longer, drum-roll-backed hold with the curtain fully closed, then a slower open (both longer
+ * than a normal round-intro's) onto a "Player X Wins!" reveal in the winner's color, with
+ * continuous confetti for as long as this screen is up — the dramatic payoff for the finale's
+ * hidden scoreboard. The confetti and text are drawn *before* the curtain panels, so the curtain
+ * genuinely masks them until it opens — nothing is visible ahead of the reveal. Falls through into
+ * the existing final-scores screen after. */
 function drawVictory(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   const elapsed = now - session.stateEnteredAt;
-  drawConfetti(ctx, elapsed);
+  const revealElapsed = Math.max(0, elapsed - VICTORY_CURTAIN_HOLD_MS);
+  const progress = Math.max(0, Math.min(1, revealElapsed / VICTORY_CURTAIN_OPEN_MS));
 
-  const progress = Math.max(0, Math.min(1, elapsed / CURTAIN_OPEN_MS));
-  drawCurtainPanels(ctx, 1 - progress);
+  drawConfetti(ctx, revealElapsed);
 
   const topScore = Math.max(0, ...session.players.map((p) => p.score));
   const winners = session.players.filter((p) => p.score === topScore);
@@ -769,6 +790,8 @@ function drawVictory(ctx: CanvasRenderingContext2D, session: GameSession, now: n
   ctx.font = "bold 64px 'Segoe UI', sans-serif";
   ctx.fillText(text, CANVAS_W / 2, CANVAS_H / 2 + 22);
   ctx.restore();
+
+  drawCurtainPanels(ctx, 1 - progress);
 }
 
 function drawGameOver(ctx: CanvasRenderingContext2D, session: GameSession): void {

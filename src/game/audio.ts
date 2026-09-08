@@ -122,6 +122,35 @@ export function playVictory(): void {
   [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.12, 0.35, "triangle", 0.28));
 }
 
+/** A snare-style drum roll that accelerates into a final crash — scheduled up front as a fixed
+ * ~1.8s sequence (matching VICTORY_CURTAIN_HOLD_MS) rather than something render.ts loops, since
+ * Web Audio lets every hit be scheduled by absolute future time in one shot. */
+export function playDrumroll(): void {
+  const c = getCtx();
+  if (!master) return;
+  const totalDur = 1.7;
+  let t = 0;
+  let gapMs = 130;
+  while (t < totalDur) {
+    snareHit(t, 0.55);
+    t += gapMs / 1000;
+    gapMs = Math.max(28, gapMs * 0.88); // accelerating roll
+  }
+  // Cymbal crash to punctuate the very end of the roll.
+  const src = c.createBufferSource();
+  src.buffer = getNoiseBuffer(c);
+  const filter = c.createBiquadFilter();
+  filter.type = "highpass";
+  filter.frequency.value = 3000;
+  const gain = c.createGain();
+  const t0 = c.currentTime + totalDur;
+  gain.gain.setValueAtTime(0.35, t0);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.5);
+  src.connect(filter).connect(gain).connect(master);
+  src.start(t0);
+  src.stop(t0 + 0.55);
+}
+
 // --- Announcer (Web Speech API — a real synthesized voice, no audio files needed) ----------
 
 function speak(text: string, pitch: number, rate: number, volume: number): void {

@@ -8,9 +8,9 @@
 import * as audio from "./audio.ts";
 import { loadCustomAudio, type CustomAudioSet } from "./customAudio.ts";
 
-const DEFAULT_VOLUME = { music: 0.35, start: 0.5, finish: 0.5, victory: 0.5 };
+const DEFAULT_VOLUME = { music: 0.35, start: 0.5, finish: 0.5, victory: 0.5, drumroll: 0.55 };
 
-let custom: CustomAudioSet = { music: null, start: null, finish: null, victory: null };
+let custom: CustomAudioSet = { music: null, start: null, finish: null, victory: null, drumroll: null };
 let musicStarted = false;
 
 export function init(): void {
@@ -26,6 +26,7 @@ export function init(): void {
       custom.victory.loop = true;
       custom.victory.volume = DEFAULT_VOLUME.victory;
     }
+    if (custom.drumroll) custom.drumroll.volume = DEFAULT_VOLUME.drumroll;
   });
 }
 
@@ -123,6 +124,23 @@ export function stopVictoryTheme(): void {
   if (custom.victory) {
     custom.victory.pause();
     custom.victory.currentTime = 0;
+  }
+}
+
+/** Plays once as the victory curtain starts its suspense hold, before it opens onto the reveal. */
+export function playDrumroll(): void {
+  if (custom.drumroll) {
+    custom.drumroll.currentTime = 0;
+    void custom.drumroll.play().catch(() => {});
+  } else {
+    audio.playDrumroll();
+  }
+}
+
+export function stopDrumroll(): void {
+  if (custom.drumroll) {
+    custom.drumroll.pause();
+    custom.drumroll.currentTime = 0;
   }
 }
 

@@ -6,5 +6,6 @@ Drop any of these files in here to replace the built-in defaults — no other se
 - `start.wav` — plays right when a round's curtain finishes opening.
 - `finish.wav` — plays when a round ends.
 - `victory.wav` — the "Player X Wins!" theme after the last round, loops for as long as that screen is showing.
+- `drumroll.wav` — plays once as the victory curtain closes and holds before it opens onto the "Player X Wins!" reveal (about 1.8 seconds of build-up).
 
 Any file you don't provide falls back to the built-in synthesized music / spoken announcer / fanfare, independently per slot.

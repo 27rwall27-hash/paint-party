@@ -1,13 +1,14 @@
-// Drop music.wav / start.wav / finish.wav / victory.wav into public/audio/ to replace the
-// built-in defaults — no settings UI, no upload flow. Any file you don't provide resolves to
-// null here and sound.ts falls back to the synthesized music / Web Speech announcer / fanfare
-// for that slot, independently.
+// Drop music.wav / start.wav / finish.wav / victory.wav / drumroll.wav into public/audio/ to
+// replace the built-in defaults — no settings UI, no upload flow. Any file you don't provide
+// resolves to null here and sound.ts falls back to the synthesized music / Web Speech announcer /
+// fanfare / drum roll for that slot, independently.
 
 export interface CustomAudioSet {
   music: HTMLAudioElement | null;
   start: HTMLAudioElement | null;
   finish: HTMLAudioElement | null;
   victory: HTMLAudioElement | null;
+  drumroll: HTMLAudioElement | null;
 }
 
 const PROBE_TIMEOUT_MS = 5000;
@@ -28,11 +29,12 @@ function tryLoad(path: string): Promise<HTMLAudioElement | null> {
 }
 
 export async function loadCustomAudio(): Promise<CustomAudioSet> {
-  const [music, start, finish, victory] = await Promise.all([
+  const [music, start, finish, victory, drumroll] = await Promise.all([
     tryLoad("/audio/music.wav"),
     tryLoad("/audio/start.wav"),
     tryLoad("/audio/finish.wav"),
     tryLoad("/audio/victory.wav"),
+    tryLoad("/audio/drumroll.wav"),
   ]);
-  return { music, start, finish, victory };
+  return { music, start, finish, victory, drumroll };
 }

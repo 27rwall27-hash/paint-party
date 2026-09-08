@@ -33,6 +33,7 @@ import {
   RESULTS_MANY_OUTLINES_THRESHOLD,
   RESULTS_MANY_OUTLINES_TOTAL_MS,
   RESULTS_PER_OUTLINE_MS,
+  RESULTS_TALLY_DELAY_MS,
   ROUND_INTRO_MS,
   SHRINK_DURATION_MS,
   SPLAT_INTERVAL_MS,
@@ -40,6 +41,8 @@ import {
   SWEEP_DURATION_MS,
   SWEEP_WIDTH,
   TICK_WINDOW_MS,
+  VICTORY_CURTAIN_HOLD_MS,
+  VICTORY_CURTAIN_OPEN_MS,
   VICTORY_MS,
   type PowerupType,
 } from "./constants.ts";
@@ -78,6 +81,9 @@ export interface SoundHooks {
   finalRoundEnd(): void;
   playSpawn(): void;
   playPointReveal(rank: 0 | 1 | 2): void;
+  /** Plays once right as the victory curtain starts its suspense hold, before it opens. */
+  playDrumroll(): void;
+  stopDrumroll(): void;
   /** The big "Player X Wins!" reveal moment — loops a custom victory theme if provided, else a
    * short synth fanfare. */
   playVictoryTheme(): void;
@@ -98,6 +104,8 @@ const noopSound: SoundHooks = {
   finalRoundEnd() {},
   playSpawn() {},
   playPointReveal() {},
+  playDrumroll() {},
+  stopDrumroll() {},
   playVictoryTheme() {},
   stopVictoryTheme() {},
 };
@@ -175,15 +183,17 @@ function randomHeading(speed: number): { vx: number; vy: number } {
 
 /** Builds the full round-results reveal sequence from already-computed results — each outline's
  * scoring players (already sorted highest-points-first, since ranking mirrors pixel coverage
- * order) get one evenly-spaced reveal step within that outline's slice of the results timeline. */
-function buildRevealTimeline(results: OutlineResult[], perOutlineMs: number): RevealStep[] {
+ * order) get one evenly-spaced reveal step within that outline's slice of the results timeline.
+ * `delayMs` pushes every step back by a flat amount (the post-"Finish!" pause) without changing
+ * the spacing between them — it's 0 for the finale's fast many-outline path. */
+function buildRevealTimeline(results: OutlineResult[], perOutlineMs: number, delayMs: number): RevealStep[] {
   const steps: RevealStep[] = [];
   results.forEach((result, outlineIndex) => {
     const scorers = result.ranking.filter((e) => e.points > 0);
     const stepMs = perOutlineMs / Math.max(1, scorers.length);
     scorers.forEach((entry, i) => {
       steps.push({
-        atMs: outlineIndex * perOutlineMs + i * stepMs,
+        atMs: delayMs + outlineIndex * perOutlineMs + i * stepMs,
         outlineIndex,
         playerId: entry.playerId,
         points: entry.points,
@@ -215,6 +225,8 @@ export class GameSession {
   /** How many entries of revealTimeline have already fired (score applied, cue played) — also
    * doubles as "index of the next one due", since the timeline is built already sorted by atMs. */
   revealedCount = 0;
+  /** Whether the victory theme has taken over from the drum roll yet this VICTORY state. */
+  private victoryRevealed = false;
   private lastTickSecond = 0;
   private finalBurstTriggered = false;
 
@@ -259,17 +271,27 @@ export class GameSession {
           } else {
             this.state = "VICTORY";
             this.stateEnteredAt = now;
-            this.sound.playVictoryTheme();
+            this.victoryRevealed = false;
+            this.sound.playDrumroll();
           }
         }
         break;
-      case "VICTORY":
-        if (now - this.stateEnteredAt >= VICTORY_MS) {
+      case "VICTORY": {
+        const elapsed = now - this.stateEnteredAt;
+        // The drum roll plays through the curtain's hold-then-open build-up; the victory theme
+        // only kicks in once the curtain has actually finished opening onto the reveal.
+        if (!this.victoryRevealed && elapsed >= VICTORY_CURTAIN_HOLD_MS + VICTORY_CURTAIN_OPEN_MS) {
+          this.victoryRevealed = true;
+          this.sound.stopDrumroll();
+          this.sound.playVictoryTheme();
+        }
+        if (elapsed >= VICTORY_MS) {
           this.state = "GAME_OVER";
           this.stateEnteredAt = now;
           this.sound.stopVictoryTheme();
         }
         break;
+      }
       case "GAME_OVER":
         if (input.anyPaintPressed()) {
           this.state = "MENU";
@@ -567,10 +589,15 @@ export class GameSession {
   private finishRound(now: number): void {
     this.lastResults = computeRoundResults(this.outlines, this.players, this.round?.pointsByRank);
     const n = this.lastResults.length;
-    this.resultsPerOutlineMs =
-      n > RESULTS_MANY_OUTLINES_THRESHOLD ? Math.max(120, RESULTS_MANY_OUTLINES_TOTAL_MS / n) : RESULTS_PER_OUTLINE_MS;
-    this.resultsDurationMs = n > 0 ? n * this.resultsPerOutlineMs + RESULTS_HOLD_MS : RESULTS_HOLD_MS;
-    this.revealTimeline = buildRevealTimeline(this.lastResults, this.resultsPerOutlineMs);
+    const manyOutlines = n > RESULTS_MANY_OUTLINES_THRESHOLD;
+    this.resultsPerOutlineMs = manyOutlines
+      ? Math.max(120, RESULTS_MANY_OUTLINES_TOTAL_MS / n)
+      : RESULTS_PER_OUTLINE_MS;
+    // The finale's fast many-outline reveal is intentionally left exactly as it was — the tally
+    // delay is a normal-round-only pause between the "Finish!" cue and the score reveal starting.
+    const tallyDelayMs = manyOutlines ? 0 : RESULTS_TALLY_DELAY_MS;
+    this.resultsDurationMs = n > 0 ? tallyDelayMs + n * this.resultsPerOutlineMs + RESULTS_HOLD_MS : RESULTS_HOLD_MS;
+    this.revealTimeline = buildRevealTimeline(this.lastResults, this.resultsPerOutlineMs, tallyDelayMs);
     this.revealedCount = 0;
     this.state = "ROUND_RESULTS";
     this.stateEnteredAt = now;
