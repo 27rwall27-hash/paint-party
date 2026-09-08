@@ -77,11 +77,12 @@ export const SWEEP_WIDTH = 46;
 export const SWEEP_BAND_HEIGHT = Math.round(CANVAS_H * 0.2);
 
 export const POWERUP_CLAIMED_FLASH_MS = 500;
-export const POWERUP_PULSE_MS = 600; // decaying "notice me" pulse right after a power-up spawns
+export const POWERUP_PULSE_PERIOD_MS = 900; // continuous "notice me" pulse for as long as it's on screen
+export const POWERUP_AURA_MS = 500; // one-time bright shine ring right when it spawns
 
 export const ROUND_INTRO_MS = 3000;
 export const CURTAIN_OPEN_MS = 1400; // portion of ROUND_INTRO_MS spent opening the curtain
-export const RESULTS_PER_OUTLINE_MS = 1600;
+export const RESULTS_PER_OUTLINE_MS = 2600; // paced for a 750ms hold + 550ms float-to-HUD per point
 export const RESULTS_HOLD_MS = 2200;
 // Rounds with more outlines than this reveal much faster so a 30-outline finale doesn't drag on.
 export const RESULTS_MANY_OUTLINES_THRESHOLD = 10;

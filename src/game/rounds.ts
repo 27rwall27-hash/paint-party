@@ -4,7 +4,6 @@ import type { OutlineSpec } from "./Outline.ts";
 import type { ShapeKind } from "./shapes.ts";
 
 export interface RoundConfig {
-  label: string;
   outlines: OutlineSpec[];
   powerupCountRange: [number, number];
   /** How many power-ups may be active on screen at the same time — grows round to round. */
@@ -71,7 +70,6 @@ const FINALE_KINDS: ShapeKind[] = ["circle", "triangle", "star", "heart", "diamo
 
 export const ROUNDS: RoundConfig[] = [
   {
-    label: "Round 1 — Warm Up",
     outlines: [
       nextSlot("circle", 340, 260, 119, 1.25),
       nextSlot("circle", 940, 260, 119, 1.25),
@@ -82,7 +80,6 @@ export const ROUNDS: RoundConfig[] = [
     durationMs: 32000,
   },
   {
-    label: "Round 2 — Four Corners",
     outlines: [
       nextSlot("star", CX, CY, 96.8, 1.25, 1.25), // center accent — kept distinct from the corner triangles
       nextSlot("triangle", 300, 210, 103.4, 1.25, 1.25),
@@ -95,7 +92,6 @@ export const ROUNDS: RoundConfig[] = [
     durationMs: 34000,
   },
   {
-    label: "Round 3 — Split Screen",
     outlines: [nextSlot("circle", 380, CY, 188, 1.25), nextSlot("circle", 900, CY, 188, 1.25)],
     powerupCountRange: [2, 4],
     concurrentPowerups: 2,
@@ -104,7 +100,6 @@ export const ROUNDS: RoundConfig[] = [
   {
     // A straight 2x2 grid was the most boring layout in the game — swapped for a wide zigzag so
     // the four targets are staggered instead of aligned, and sized up like everything else.
-    label: "Round 4 — Heart & Diamond Wave",
     outlines: [
       nextSlot("heart", 210, 245, 144),
       nextSlot("diamond", 497, 465, 144),
@@ -116,14 +111,12 @@ export const ROUNDS: RoundConfig[] = [
     durationMs: 38000,
   },
   {
-    label: "Round 5 — The Big One",
     outlines: [{ kind: "rectangle", cx: CX, cy: CY, radius: 0, width: CANVAS_W - 160, height: CANVAS_H - 180 }],
     powerupCountRange: [4, 6],
     concurrentPowerups: 3,
     durationMs: 30000,
   },
   {
-    label: "Round 6 — Finale Chaos",
     outlines: scatterOutlines(30, 26, FINALE_KINDS, { Eiffel: 1.1, Pisa: 1.5 }),
     powerupCountRange: [12, 18],
     concurrentPowerups: 5,

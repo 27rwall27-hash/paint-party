@@ -8,8 +8,9 @@ import {
   GUN_LENGTH,
   gunStationX,
   IMPACT_FLASH_MS,
+  POWERUP_AURA_MS,
   POWERUP_ICONS,
-  POWERUP_PULSE_MS,
+  POWERUP_PULSE_PERIOD_MS,
   PROJECTILE_ARC_HEIGHT,
   PROJECTILE_DURATION_MS,
   PROJECTILE_MIN_SCALE,
@@ -17,12 +18,12 @@ import {
   TICK_WINDOW_MS,
 } from "./constants.ts";
 import type { GameSession } from "./GameSession.ts";
+import type { Powerup } from "./Outline.ts";
 import { currentMaxRadius, isMachineGunActive } from "./Player.ts";
 import { ROUNDS } from "./rounds.ts";
 
 const BG = "#eef0f4";
 const INK = "#241f29";
-const REVEAL_FLY_DURATION_MS = 550;
 
 let canvasTexture: CanvasPattern | null | undefined;
 
@@ -171,17 +172,37 @@ function drawOutlines(ctx: CanvasRenderingContext2D, session: GameSession): void
   }
 }
 
+/** A brief bright ring that expands and fades out right when a power-up spawns — separate from
+ * the continuous pulse, a one-time "look here" flash for the first half second on screen. */
+function drawPowerupAura(ctx: CanvasRenderingContext2D, p: Powerup, now: number): void {
+  const t = (now - p.spawnedAt) / POWERUP_AURA_MS;
+  if (t < 0 || t >= 1) return;
+  const radius = p.radius * (1 + t * 1.8);
+  const alpha = (1 - t) * 0.7;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = "#fff9d6";
+  ctx.lineWidth = 4 * (1 - t) + 1;
+  ctx.beginPath();
+  ctx.arc(p.cx, p.cy, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawPowerups(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   for (const p of session.visiblePowerups(now)) {
     const claimed = p.state === "claimed";
     const owner = claimed ? session.players.find((pl) => pl.id === p.claimedBy) : undefined;
+
+    if (!claimed) drawPowerupAura(ctx, p, now);
+
     ctx.save();
     if (!claimed) {
-      // Decaying pulse for a moment right after spawning, so a new power-up catches the eye
-      // instead of blending into the background — purely a function of elapsed time, like every
-      // other animated effect in this file.
-      const pulseT = Math.max(0, Math.min(1, (now - p.spawnedAt) / POWERUP_PULSE_MS));
-      const pulseScale = 1 + 0.35 * Math.sin(pulseT * Math.PI * 3) * (1 - pulseT);
+      // Continuous "notice me" pulse for as long as it's on screen (not just a moment after
+      // spawning) — purely a function of elapsed time, like every other animated effect here.
+      const phase = ((now - p.spawnedAt) / POWERUP_PULSE_PERIOD_MS) * Math.PI * 2;
+      const pulseScale = 1 + 0.12 * Math.sin(phase);
       ctx.translate(p.cx, p.cy);
       ctx.scale(pulseScale, pulseScale);
       ctx.translate(-p.cx, -p.cy);
@@ -463,7 +484,7 @@ export function updateDomHud(session: GameSession, now: number): void {
     hudTimerEl.classList.remove("hud-timer-urgent");
   } else {
     const cfg = ROUNDS[session.roundIndex];
-    hudRoundEl.textContent = cfg ? `${cfg.label} (${session.roundIndex + 1}/${ROUNDS.length})` : "";
+    hudRoundEl.textContent = cfg ? `Round ${session.roundIndex + 1} of ${ROUNDS.length}` : "";
     if (session.state === "PLAYING") {
       const msLeft = session.roundEndAt - now;
       hudTimerEl.textContent = `${Math.max(0, Math.ceil(msLeft / 1000))}s`;
@@ -474,8 +495,18 @@ export function updateDomHud(session: GameSession, now: number): void {
     }
   }
 
-  hudScoresEl.innerHTML = session.players
-    .map((p) => `<span style="color:${p.color}">${p.name} ${p.score}</span>`)
+  // Sorted by score so it reads as an actual leaderboard, with whoever's currently in the lead
+  // (ties included) visually called out — otherwise it's hard to tell who's winning at a glance.
+  const sorted = [...session.players].sort((a, b) => b.score - a.score);
+  const topScore = sorted[0]?.score ?? 0;
+  hudScoresEl.innerHTML = sorted
+    .map((p) => {
+      const isLeader = topScore > 0 && p.score === topScore;
+      const scoreText = Number.isInteger(p.score) ? String(p.score) : p.score.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+      return `<span class="hudScoreItem${isLeader ? " is-leader" : ""}" style="--player-color:${p.color}">${
+        isLeader ? '<span class="hudCrown">👑</span>' : ""
+      }<span class="hudName">${p.name}</span><span class="hudPts">${scoreText}</span></span>`;
+    })
     .join("");
 }
 
@@ -527,7 +558,6 @@ function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: n
   ctx.fillRect(0, 0, CANVAS_W, 24);
   ctx.restore();
 
-  const cfg = ROUNDS[session.roundIndex];
   const secsLeft = Math.max(0, Math.ceil((ROUND_INTRO_MS - elapsed) / 1000));
 
   ctx.save();
@@ -537,10 +567,59 @@ function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: n
   ctx.fillRect(CANVAS_W / 2 - boxW / 2, CANVAS_H / 2 - 100, boxW, 190);
   ctx.fillStyle = "#fff";
   ctx.font = "bold 46px 'Segoe UI', sans-serif";
-  ctx.fillText(cfg?.label ?? "", CANVAS_W / 2, CANVAS_H / 2 - 30);
+  ctx.fillText(`Round ${session.roundIndex + 1}`, CANVAS_W / 2, CANVAS_H / 2 - 30);
   ctx.font = "bold 70px 'Segoe UI', sans-serif";
   ctx.fillText(String(secsLeft || 1), CANVAS_W / 2, CANVAS_H / 2 + 60);
   ctx.restore();
+
+  // A burst of confetti once the curtain finishes opening, fading out for the rest of the intro.
+  drawConfetti(ctx, elapsed);
+}
+
+const CONFETTI_COUNT = 40;
+const CONFETTI_COLORS = ["#e63946", "#3a86ff", "#ffd60a", "#2ecc71", "#ff8fab", "#9b5de5"];
+
+/** Deterministic pseudo-random per-particle motion seeded only by particle index, so every call
+ * this frame (and every frame after it) computes the same particle at the same elapsed time
+ * without render.ts needing to own any mutable confetti state — same "pure function of elapsed
+ * time" pattern as every other animated effect here. */
+function drawConfetti(ctx: CanvasRenderingContext2D, elapsed: number): void {
+  const t = elapsed - CURTAIN_OPEN_MS;
+  if (t < 0) return;
+  const fadeWindow = ROUND_INTRO_MS - CURTAIN_OPEN_MS;
+  const globalAlpha = Math.max(0, 1 - t / fadeWindow);
+  if (globalAlpha <= 0) return;
+
+  for (let i = 0; i < CONFETTI_COUNT; i++) {
+    const seed = i * 12.9898;
+    const rand = (n: number) => {
+      const x = Math.sin(seed + n) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    const delayMs = rand(8) * 400;
+    const particleT = (t - delayMs) / 1000;
+    if (particleT < 0) continue;
+
+    const x0 = rand(1) * CANVAS_W;
+    const fallSpeed = 90 + rand(2) * 140;
+    const y = -20 + particleT * fallSpeed;
+    if (y > CANVAS_H) continue;
+
+    const sway = 20 + rand(3) * 30;
+    const swayFreq = 1.5 + rand(4) * 2;
+    const x = x0 + Math.sin(particleT * swayFreq) * sway;
+    const size = 5 + rand(5) * 6;
+    const color = CONFETTI_COLORS[Math.floor(rand(6) * CONFETTI_COLORS.length)]!;
+    const rotation = particleT * ((rand(7) - 0.5) * 6);
+
+    ctx.save();
+    ctx.globalAlpha = globalAlpha;
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    ctx.fillStyle = color;
+    ctx.fillRect(-size / 2, -size / 4, size, size / 2);
+    ctx.restore();
+  }
 }
 
 function drawRoundResults(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
@@ -559,49 +638,51 @@ function drawRoundResults(ctx: CanvasRenderingContext2D, session: GameSession, n
     // actually sits, in that player's color, as its turn in the timeline comes up.
     drawResultsInPlaceReveal(ctx, session, elapsed);
   }
-
-  const totalDuration = Math.max(session.resultsDurationMs, 1);
-  const secsLeft = Math.max(0, Math.ceil((totalDuration - elapsed) / 1000));
-  ctx.save();
-  ctx.fillStyle = "rgba(20,17,24,0.6)";
-  const label = `Next round in ${secsLeft}s`;
-  ctx.font = "bold 18px 'Segoe UI', sans-serif";
-  const w = ctx.measureText(label).width;
-  ctx.fillRect(CANVAS_W / 2 - w / 2 - 14, CANVAS_H - 58, w + 28, 30);
-  ctx.fillStyle = "#fff";
-  ctx.fillText(label, CANVAS_W / 2, CANVAS_H - 37);
-  ctx.restore();
 }
 
-/** Animates each scoring player's "+N" appearing just above its own outline's real position and
- * radius on the board and floating upward, purely a function of elapsed time against
- * session.revealTimeline — same pattern as every other animated effect in this file (impacts,
- * projectiles, the curtain). A stroke outline keeps it legible over whatever's already painted
- * there, since there's no dimming panel behind it to guarantee contrast. */
+const REVEAL_HOLD_MS = 750; // sits in place, readable, before it starts moving
+const REVEAL_TRAVEL_MS = 550; // then floats up toward the leaderboard in the HUD
+
+/** Animates each scoring player's "+N" appearing just above its own outline's real position,
+ * holding there briefly, then floating up toward the leaderboard at the top of the screen —
+ * purely a function of elapsed time against session.revealTimeline, same pattern as every other
+ * animated effect in this file (impacts, projectiles, the curtain). A stroke outline keeps it
+ * legible over whatever's already painted there, since there's no dimming panel behind it. */
 function drawResultsInPlaceReveal(ctx: CanvasRenderingContext2D, session: GameSession, elapsed: number): void {
-  const FLOAT_DISTANCE = 70;
+  const totalMs = REVEAL_HOLD_MS + REVEAL_TRAVEL_MS;
   // boundingRadius is calibrated conservatively for overlap/collision checks, not visual size —
   // a tall thin custom shape can report one big enough to push "just above it" off the top of the
-  // canvas entirely. Clamp the float's whole range (start AND the 70px it rises further) clear of
-  // the frame/HUD, not just its starting point.
-  const MIN_START_Y = 90 + FLOAT_DISTANCE;
+  // canvas entirely, so the hold position is clamped clear of the frame/HUD regardless of size.
+  const MIN_HOLD_Y = 110;
+  const ARRIVAL_Y = 22; // near the top edge, right where the HUD leaderboard sits just above
+
   for (const step of session.revealTimeline) {
-    const t = (elapsed - step.atMs) / REVEAL_FLY_DURATION_MS;
-    if (t < 0 || t >= 1) continue;
+    const local = elapsed - step.atMs;
+    if (local < 0 || local >= totalMs) continue;
     const outline = session.outlines[step.outlineIndex];
     if (!outline) continue;
 
     const player = session.players.find((p) => p.id === step.playerId);
-    const startY = Math.max(MIN_START_Y, outline.cy - outline.boundingRadius - 16);
-    const popT = Math.min(1, t / 0.25);
-    const pop = 1 + 0.3 * Math.sin(popT * Math.PI);
-    const eased = t * t * (3 - 2 * t); // smoothstep — quick pop, then an easing float upward
-    const y = startY - FLOAT_DISTANCE * eased;
-    const alpha = t < 0.7 ? 1 : Math.max(0, 1 - (t - 0.7) / 0.3);
+    const holdY = Math.max(MIN_HOLD_Y, outline.cy - outline.boundingRadius - 16);
+
+    let y: number;
+    let scale: number;
+    let alpha = 1;
+    if (local < REVEAL_HOLD_MS) {
+      const popT = Math.min(1, local / 200);
+      scale = 1 + 0.3 * Math.sin(popT * Math.PI);
+      y = holdY;
+    } else {
+      const travelT = (local - REVEAL_HOLD_MS) / REVEAL_TRAVEL_MS;
+      const eased = travelT * travelT * (3 - 2 * travelT); // smoothstep
+      y = holdY - (holdY - ARRIVAL_Y) * eased;
+      scale = 1 - 0.35 * eased; // shrinks a little as it arrives, reads as receding toward the HUD
+      alpha = travelT < 0.55 ? 1 : Math.max(0, 1 - (travelT - 0.55) / 0.45);
+    }
 
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.font = `bold ${Math.round(22 * pop)}px 'Segoe UI', sans-serif`;
+    ctx.font = `bold ${Math.round(24 * scale)}px 'Segoe UI', sans-serif`;
     ctx.textAlign = "center";
     ctx.lineWidth = 3;
     ctx.strokeStyle = "rgba(20,17,24,0.65)";

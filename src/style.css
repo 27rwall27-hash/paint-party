@@ -68,11 +68,46 @@ body {
 
 #hudScores {
   display: flex;
-  gap: 14px;
+  gap: 8px;
 }
 
-#hudScores span {
+.hudScoreItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1.5px solid var(--player-color);
   white-space: nowrap;
+  font-size: 14px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hudScoreItem.is-leader {
+  background: rgba(255, 214, 10, 0.16);
+  border-color: #ffd60a;
+  box-shadow: 0 0 10px rgba(255, 214, 10, 0.55);
+  transform: scale(1.1);
+}
+
+.hudCrown {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.hudName {
+  color: var(--player-color);
+  font-weight: 700;
+}
+
+.hudPts {
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.hudScoreItem.is-leader .hudPts {
+  color: #ffd60a;
 }
 
 #game {
