@@ -8,9 +8,9 @@
 import * as audio from "./audio.ts";
 import { loadCustomAudio, type CustomAudioSet } from "./customAudio.ts";
 
-const DEFAULT_VOLUME = { music: 0.35, start: 0.5, finish: 0.5 };
+const DEFAULT_VOLUME = { music: 0.35, start: 0.5, finish: 0.5, victory: 0.5 };
 
-let custom: CustomAudioSet = { music: null, start: null, finish: null };
+let custom: CustomAudioSet = { music: null, start: null, finish: null, victory: null };
 let musicStarted = false;
 
 export function init(): void {
@@ -22,6 +22,10 @@ export function init(): void {
     }
     if (custom.start) custom.start.volume = DEFAULT_VOLUME.start;
     if (custom.finish) custom.finish.volume = DEFAULT_VOLUME.finish;
+    if (custom.victory) {
+      custom.victory.loop = true;
+      custom.victory.volume = DEFAULT_VOLUME.victory;
+    }
   });
 }
 
@@ -104,9 +108,22 @@ export function setUrgent(value: boolean): void {
   audio.setUrgent(value);
 }
 
-export function gameOver(): void {
-  stopMusicPlayback();
-  audio.playVictory();
+/** The big "Player X Wins!" reveal — loops the custom victory theme if provided, else a short
+ * synth fanfare (which just plays once; there's nothing to loop without a real track). */
+export function playVictoryTheme(): void {
+  if (custom.victory) {
+    custom.victory.currentTime = 0;
+    void custom.victory.play().catch(() => {});
+  } else {
+    audio.playVictory();
+  }
+}
+
+export function stopVictoryTheme(): void {
+  if (custom.victory) {
+    custom.victory.pause();
+    custom.victory.currentTime = 0;
+  }
 }
 
 export function playSplat(): void {

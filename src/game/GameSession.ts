@@ -40,6 +40,7 @@ import {
   SWEEP_DURATION_MS,
   SWEEP_WIDTH,
   TICK_WINDOW_MS,
+  VICTORY_MS,
   type PowerupType,
 } from "./constants.ts";
 import type { PlayerInputState } from "./Input.ts";
@@ -51,7 +52,7 @@ import { ROUNDS } from "./rounds.ts";
 
 const PLAYER_KEYS = PLAYER_DEFS.map((d) => d.keys);
 
-export type GameState = "MENU" | "ROUND_INTRO" | "PLAYING" | "ROUND_RESULTS" | "GAME_OVER";
+export type GameState = "MENU" | "ROUND_INTRO" | "PLAYING" | "ROUND_RESULTS" | "VICTORY" | "GAME_OVER";
 
 /** Whatever supplies per-player input each frame — the browser's real InputManager locally, or
  * a server-side store filled from socket messages when running as the authoritative host. */
@@ -71,13 +72,16 @@ export interface SoundHooks {
   playTick(): void;
   playSplat(): void;
   playClaim(): void;
-  gameOver(): void;
   setRoundSpeed(roundIndex: number): void;
   playCurtain(): void;
   roundEnd(): void;
   finalRoundEnd(): void;
   playSpawn(): void;
   playPointReveal(rank: 0 | 1 | 2): void;
+  /** The big "Player X Wins!" reveal moment — loops a custom victory theme if provided, else a
+   * short synth fanfare. */
+  playVictoryTheme(): void;
+  stopVictoryTheme(): void;
 }
 
 const noopSound: SoundHooks = {
@@ -88,13 +92,14 @@ const noopSound: SoundHooks = {
   playTick() {},
   playSplat() {},
   playClaim() {},
-  gameOver() {},
   setRoundSpeed() {},
   playCurtain() {},
   roundEnd() {},
   finalRoundEnd() {},
   playSpawn() {},
   playPointReveal() {},
+  playVictoryTheme() {},
+  stopVictoryTheme() {},
 };
 
 /** Emitted whenever an Outline's paint canvas actually changes, so a server can broadcast just
@@ -252,10 +257,17 @@ export class GameSession {
           if (this.roundIndex + 1 < ROUNDS.length) {
             this.beginRound(this.roundIndex + 1, now);
           } else {
-            this.state = "GAME_OVER";
+            this.state = "VICTORY";
             this.stateEnteredAt = now;
-            this.sound.gameOver();
+            this.sound.playVictoryTheme();
           }
+        }
+        break;
+      case "VICTORY":
+        if (now - this.stateEnteredAt >= VICTORY_MS) {
+          this.state = "GAME_OVER";
+          this.stateEnteredAt = now;
+          this.sound.stopVictoryTheme();
         }
         break;
       case "GAME_OVER":

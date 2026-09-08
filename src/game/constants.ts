@@ -81,12 +81,17 @@ export const POWERUP_PULSE_PERIOD_MS = 900; // continuous "notice me" pulse for 
 export const POWERUP_AURA_MS = 500; // one-time bright shine ring right when it spawns
 
 export const ROUND_INTRO_MS = 3000;
-export const CURTAIN_OPEN_MS = 1400; // portion of ROUND_INTRO_MS spent opening the curtain
+export const CURTAIN_OPEN_MS = 1400; // portion of ROUND_INTRO_MS (or VICTORY_MS) spent opening
+export const CURTAIN_CLOSE_MS = 1200; // tail of RESULTS_HOLD_MS spent closing before the next reveal
 export const RESULTS_PER_OUTLINE_MS = 2600; // paced for a 750ms hold + 550ms float-to-HUD per point
 export const RESULTS_HOLD_MS = 2200;
 // Rounds with more outlines than this reveal much faster so a 30-outline finale doesn't drag on.
 export const RESULTS_MANY_OUTLINES_THRESHOLD = 10;
 export const RESULTS_MANY_OUTLINES_TOTAL_MS = 6500;
+
+// The "Player X Wins!" reveal after the finale's results — curtain opens (CURTAIN_OPEN_MS) into
+// it, holds with continuous confetti for the rest, then the existing final-scores screen takes over.
+export const VICTORY_MS = 4500;
 
 export const DEFAULT_POINTS_BY_RANK = [3, 2, 1, 0];
 export const FINALE_POINTS_BY_RANK = [1, 0.5, 0.25, 0];

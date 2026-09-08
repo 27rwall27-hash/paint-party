@@ -1,6 +1,7 @@
 import {
   CANVAS_H,
   CANVAS_W,
+  CURTAIN_CLOSE_MS,
   CURTAIN_OPEN_MS,
   DEFAULT_MAX_RADIUS,
   GUN_BASE_Y,
@@ -88,6 +89,7 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
   drawFrame(ctx);
 
   if (session.state === "ROUND_INTRO") drawCurtain(ctx, session, now);
+  if (session.state === "VICTORY") drawVictory(ctx, session, now);
 
   updateDomHud(session, now);
 }
@@ -495,19 +497,28 @@ export function updateDomHud(session: GameSession, now: number): void {
     }
   }
 
-  // Sorted by score so it reads as an actual leaderboard, with whoever's currently in the lead
-  // (ties included) visually called out — otherwise it's hard to tell who's winning at a glance.
-  const sorted = [...session.players].sort((a, b) => b.score - a.score);
-  const topScore = sorted[0]?.score ?? 0;
-  hudScoresEl.innerHTML = sorted
-    .map((p) => {
-      const isLeader = topScore > 0 && p.score === topScore;
-      const scoreText = Number.isInteger(p.score) ? String(p.score) : p.score.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
-      return `<span class="hudScoreItem${isLeader ? " is-leader" : ""}" style="--player-color:${p.color}">${
-        isLeader ? '<span class="hudCrown">👑</span>' : ""
-      }<span class="hudName">${p.name}</span><span class="hudPts">${scoreText}</span></span>`;
-    })
-    .join("");
+  // The finale keeps the leaderboard hidden entirely — from the moment its curtain opens right up
+  // through the "Player X Wins!" reveal — so the standings stay a secret until that big moment.
+  const isFinaleBlackout =
+    session.roundIndex === ROUNDS.length - 1 && session.state !== "GAME_OVER" && session.state !== "MENU";
+
+  if (isFinaleBlackout) {
+    hudScoresEl.innerHTML = "";
+  } else {
+    // Sorted by score so it reads as an actual leaderboard, with whoever's currently in the lead
+    // (ties included) visually called out — otherwise it's hard to tell who's winning at a glance.
+    const sorted = [...session.players].sort((a, b) => b.score - a.score);
+    const topScore = sorted[0]?.score ?? 0;
+    hudScoresEl.innerHTML = sorted
+      .map((p) => {
+        const isLeader = topScore > 0 && p.score === topScore;
+        const scoreText = Number.isInteger(p.score) ? String(p.score) : p.score.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+        return `<span class="hudScoreItem${isLeader ? " is-leader" : ""}" style="--player-color:${p.color}">${
+          isLeader ? '<span class="hudCrown">👑</span>' : ""
+        }<span class="hudName">${p.name}</span><span class="hudPts">${scoreText}</span></span>`;
+      })
+      .join("");
+  }
 }
 
 function drawPanel(ctx: CanvasRenderingContext2D, alpha: number): void {
@@ -544,11 +555,14 @@ function drawVelvetPanel(ctx: CanvasRenderingContext2D, x: number, w: number): v
   ctx.restore();
 }
 
-function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
-  const elapsed = now - session.stateEnteredAt;
-  const progress = Math.max(0, Math.min(1, elapsed / CURTAIN_OPEN_MS));
+/** Draws the velvet side panels at a given "how closed" amount (0 = fully open/no panel, 1 =
+ * fully closed/meeting in the middle) — shared by the round-intro opening, the results-screen
+ * closing tail, and the victory reveal's opening, so the motion is visually continuous across all
+ * three (a close always ends exactly where the next open begins). */
+function drawCurtainPanels(ctx: CanvasRenderingContext2D, closedAmount: number): void {
   const half = CANVAS_W / 2;
-  const panelW = half * (1 - progress);
+  const panelW = half * Math.max(0, Math.min(1, closedAmount));
+  if (panelW <= 0) return;
 
   drawVelvetPanel(ctx, 0, panelW);
   drawVelvetPanel(ctx, CANVAS_W - panelW, panelW);
@@ -557,6 +571,12 @@ function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: n
   ctx.fillStyle = "#3a2312";
   ctx.fillRect(0, 0, CANVAS_W, 24);
   ctx.restore();
+}
+
+function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
+  const elapsed = now - session.stateEnteredAt;
+  const progress = Math.max(0, Math.min(1, elapsed / CURTAIN_OPEN_MS));
+  drawCurtainPanels(ctx, 1 - progress);
 
   const secsLeft = Math.max(0, Math.ceil((ROUND_INTRO_MS - elapsed) / 1000));
 
@@ -571,40 +591,32 @@ function drawCurtain(ctx: CanvasRenderingContext2D, session: GameSession, now: n
   ctx.font = "bold 70px 'Segoe UI', sans-serif";
   ctx.fillText(String(secsLeft || 1), CANVAS_W / 2, CANVAS_H / 2 + 60);
   ctx.restore();
-
-  // A burst of confetti once the curtain finishes opening, fading out for the rest of the intro.
-  drawConfetti(ctx, elapsed);
 }
 
-const CONFETTI_COUNT = 40;
+const CONFETTI_COUNT = 60;
 const CONFETTI_COLORS = ["#e63946", "#3a86ff", "#ffd60a", "#2ecc71", "#ff8fab", "#9b5de5"];
 
-/** Deterministic pseudo-random per-particle motion seeded only by particle index, so every call
- * this frame (and every frame after it) computes the same particle at the same elapsed time
- * without render.ts needing to own any mutable confetti state — same "pure function of elapsed
- * time" pattern as every other animated effect here. */
+/** Continuous confetti shower — each particle loops back to the top as soon as it falls past the
+ * bottom, so it keeps falling for as long as the caller keeps drawing it (the victory screen).
+ * Deterministic pseudo-random motion seeded only by particle index, so every call this frame (and
+ * every frame after it) computes the same particle at the same elapsed time without render.ts
+ * needing to own any mutable confetti state — same "pure function of elapsed time" pattern as
+ * every other animated effect here. */
 function drawConfetti(ctx: CanvasRenderingContext2D, elapsed: number): void {
-  const t = elapsed - CURTAIN_OPEN_MS;
-  if (t < 0) return;
-  const fadeWindow = ROUND_INTRO_MS - CURTAIN_OPEN_MS;
-  const globalAlpha = Math.max(0, 1 - t / fadeWindow);
-  if (globalAlpha <= 0) return;
-
   for (let i = 0; i < CONFETTI_COUNT; i++) {
     const seed = i * 12.9898;
     const rand = (n: number) => {
       const x = Math.sin(seed + n) * 43758.5453;
       return x - Math.floor(x);
     };
-    const delayMs = rand(8) * 400;
-    const particleT = (t - delayMs) / 1000;
-    if (particleT < 0) continue;
+
+    const fallSpeed = 90 + rand(2) * 140;
+    const cycleMs = ((CANVAS_H + 40) / fallSpeed) * 1000;
+    const offsetMs = rand(8) * cycleMs;
+    const particleT = (((elapsed + offsetMs) % cycleMs) + cycleMs) % cycleMs / 1000;
+    const y = -20 + particleT * fallSpeed;
 
     const x0 = rand(1) * CANVAS_W;
-    const fallSpeed = 90 + rand(2) * 140;
-    const y = -20 + particleT * fallSpeed;
-    if (y > CANVAS_H) continue;
-
     const sway = 20 + rand(3) * 30;
     const swayFreq = 1.5 + rand(4) * 2;
     const x = x0 + Math.sin(particleT * swayFreq) * sway;
@@ -613,7 +625,6 @@ function drawConfetti(ctx: CanvasRenderingContext2D, elapsed: number): void {
     const rotation = particleT * ((rand(7) - 0.5) * 6);
 
     ctx.save();
-    ctx.globalAlpha = globalAlpha;
     ctx.translate(x, y);
     ctx.rotate(rotation);
     ctx.fillStyle = color;
@@ -637,6 +648,14 @@ function drawRoundResults(ctx: CanvasRenderingContext2D, session: GameSession, n
     // frame; the point reveal just floats small "+N" text above each outline right where it
     // actually sits, in that player's color, as its turn in the timeline comes up.
     drawResultsInPlaceReveal(ctx, session, elapsed);
+  }
+
+  // The curtain closes over the last stretch of the results screen, ending fully closed exactly
+  // when this state ends — the next screen (round intro, or the victory reveal after the finale)
+  // opens from there, so the motion reads as one continuous close-then-open, not two cuts.
+  const closeStart = session.resultsDurationMs - CURTAIN_CLOSE_MS;
+  if (elapsed >= closeStart) {
+    drawCurtainPanels(ctx, (elapsed - closeStart) / CURTAIN_CLOSE_MS);
   }
 }
 
@@ -696,6 +715,17 @@ function drawResultsInPlaceReveal(ctx: CanvasRenderingContext2D, session: GameSe
 function drawRoundTotals(ctx: CanvasRenderingContext2D, session: GameSession): void {
   ctx.fillStyle = "#fff";
   ctx.font = "bold 36px 'Segoe UI', sans-serif";
+
+  // The finale keeps the standings a secret right up to the "Player X Wins!" reveal — showing
+  // real totals here would spoil it, so this stays deliberately vague for that one round.
+  if (session.roundIndex === ROUNDS.length - 1) {
+    ctx.fillText("Final Scores Are In...", CANVAS_W / 2, 130);
+    ctx.font = "22px 'Segoe UI', sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.fillText("The results are revealed after the curtain falls.", CANVAS_W / 2, 190);
+    return;
+  }
+
   ctx.fillText("Round Total", CANVAS_W / 2, 130);
 
   const totals = session.players.map((p) => {
@@ -713,6 +743,32 @@ function drawRoundTotals(ctx: CanvasRenderingContext2D, session: GameSession): v
     ctx.font = "bold 26px 'Segoe UI', sans-serif";
     ctx.fillText(`${player.name}  +${gained}  (${player.score} total)`, CANVAS_W / 2, y);
   });
+}
+
+/** The curtain opens (same motion/timing as a round intro) into a "Player X Wins!" reveal in the
+ * winner's color, with continuous confetti for as long as this screen is up — the dramatic payoff
+ * for the finale's hidden scoreboard. Falls through into the existing final-scores screen after. */
+function drawVictory(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
+  const elapsed = now - session.stateEnteredAt;
+  drawConfetti(ctx, elapsed);
+
+  const progress = Math.max(0, Math.min(1, elapsed / CURTAIN_OPEN_MS));
+  drawCurtainPanels(ctx, 1 - progress);
+
+  const topScore = Math.max(0, ...session.players.map((p) => p.score));
+  const winners = session.players.filter((p) => p.score === topScore);
+  const winnerColor = winners[0]?.color ?? "#fff";
+  const text =
+    winners.length > 1 ? `${winners.map((p) => p.name).join(" & ")} Win!` : `${winners[0]?.name ?? "?"} Wins!`;
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(20,17,24,0.4)";
+  ctx.fillRect(0, CANVAS_H / 2 - 90, CANVAS_W, 180);
+  ctx.fillStyle = winnerColor;
+  ctx.font = "bold 64px 'Segoe UI', sans-serif";
+  ctx.fillText(text, CANVAS_W / 2, CANVAS_H / 2 + 22);
+  ctx.restore();
 }
 
 function drawGameOver(ctx: CanvasRenderingContext2D, session: GameSession): void {
