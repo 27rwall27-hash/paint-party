@@ -28,6 +28,7 @@ export class NetworkClient {
 
   private channel: RealtimeChannel | undefined;
   private name = "Player";
+  private color = "#e63946";
   private lastSentInput: PlayerInputState | undefined;
 
   private slotAssignedHandlers: Array<(slot: number) => void> = [];
@@ -61,7 +62,7 @@ export class NetworkClient {
     const state = this.channel?.presenceState<PresencePayload>() ?? {};
     return Object.values(state)
       .flat()
-      .map((p) => ({ clientId: p.clientId, name: p.name, slot: p.slot, isHost: p.isHost }));
+      .map((p) => ({ clientId: p.clientId, name: p.name, color: p.color, slot: p.slot, isHost: p.isHost }));
   }
 
   private wireCommonListeners(): void {
@@ -80,8 +81,9 @@ export class NetworkClient {
   }
 
   /** Creates a new room, becoming its host. Resolves with the room code once subscribed. */
-  createRoom(name: string): Promise<string> {
+  createRoom(name: string, color: string): Promise<string> {
     this.name = name;
+    this.color = color;
     this.isHost = true;
     this.mySlot = 0;
     const code = randomCode();
@@ -107,7 +109,13 @@ export class NetworkClient {
     return new Promise((resolve) => {
       channel.subscribe((status) => {
         if (status !== "SUBSCRIBED") return;
-        void channel.track({ clientId: this.clientId, name: this.name, slot: 0, isHost: true } satisfies PresencePayload);
+        void channel.track({
+          clientId: this.clientId,
+          name: this.name,
+          color: this.color,
+          slot: 0,
+          isHost: true,
+        } satisfies PresencePayload);
         resolve(code);
       });
     });
@@ -132,8 +140,9 @@ export class NetworkClient {
   }
 
   /** Joins an existing room as a guest. */
-  joinRoom(code: string, name: string): void {
+  joinRoom(code: string, name: string, color: string): void {
     this.name = name;
+    this.color = color;
     this.isHost = false;
     const supabase = getSupabaseClient();
     const channel = supabase.channel(`room:${code.trim().toUpperCase()}`, {
@@ -146,7 +155,13 @@ export class NetworkClient {
       const { clientId, slot } = payload as SlotAssignPayload;
       if (clientId !== this.clientId) return;
       this.mySlot = slot;
-      void channel.track({ clientId: this.clientId, name: this.name, slot, isHost: false } satisfies PresencePayload);
+      void channel.track({
+        clientId: this.clientId,
+        name: this.name,
+        color: this.color,
+        slot,
+        isHost: false,
+      } satisfies PresencePayload);
       for (const handler of this.slotAssignedHandlers) handler(slot);
     });
 
@@ -158,7 +173,13 @@ export class NetworkClient {
 
     channel.subscribe((status) => {
       if (status !== "SUBSCRIBED") return;
-      void channel.track({ clientId: this.clientId, name: this.name, slot: null, isHost: false } satisfies PresencePayload);
+      void channel.track({
+        clientId: this.clientId,
+        name: this.name,
+        color: this.color,
+        slot: null,
+        isHost: false,
+      } satisfies PresencePayload);
     });
   }
 

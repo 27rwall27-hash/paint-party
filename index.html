@@ -16,6 +16,27 @@
         <canvas id="game" width="1280" height="720"></canvas>
       </div>
 
+      <details id="playerSetup">
+        <summary>Player Names &amp; Colors</summary>
+        <p class="settingsHint">Customize each local player before starting a match.</p>
+        <div class="settingsRow" data-slot="0">
+          <input class="playerNameInput" data-slot="0" type="text" maxlength="12" placeholder="P1" />
+          <input class="playerColorInput" data-slot="0" type="color" value="#e63946" />
+        </div>
+        <div class="settingsRow" data-slot="1">
+          <input class="playerNameInput" data-slot="1" type="text" maxlength="12" placeholder="P2" />
+          <input class="playerColorInput" data-slot="1" type="color" value="#3a86ff" />
+        </div>
+        <div class="settingsRow" data-slot="2">
+          <input class="playerNameInput" data-slot="2" type="text" maxlength="12" placeholder="P3" />
+          <input class="playerColorInput" data-slot="2" type="color" value="#ffd60a" />
+        </div>
+        <div class="settingsRow" data-slot="3">
+          <input class="playerNameInput" data-slot="3" type="text" maxlength="12" placeholder="P4" />
+          <input class="playerColorInput" data-slot="3" type="color" value="#2ecc71" />
+        </div>
+      </details>
+
       <details id="online">
         <summary>Play Online (beta)</summary>
         <p class="settingsHint">
@@ -23,6 +44,10 @@
           with you. Everyone online plays with WASD to move and Space to paint, regardless of
           which slot they're assigned.
         </p>
+        <div class="settingsRow">
+          <input id="onlineNameInput" type="text" placeholder="Your name" maxlength="12" />
+          <input id="onlineColorInput" type="color" value="#e63946" />
+        </div>
         <div class="settingsRow">
           <button id="onlineCreateBtn" type="button">Create Room</button>
         </div>

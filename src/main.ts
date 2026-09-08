@@ -5,6 +5,7 @@ import { render } from "./game/render.ts";
 import * as sound from "./game/sound.ts";
 import { initOnlineUI } from "./game/onlineUI.ts";
 import { onlineMode, onlineNow } from "./game/onlineMode.ts";
+import { initPlayerSetupUI } from "./game/playerSetupUI.ts";
 import { PLAYER_DEFS } from "./game/constants.ts";
 
 sound.init();
@@ -15,6 +16,7 @@ const ctx = canvas.getContext("2d")!;
 
 const input = new InputManager();
 const session = new GameSession(sound);
+initPlayerSetupUI(session);
 
 let lastTime = performance.now();
 

@@ -41,6 +41,7 @@ export interface NetPowerup {
 export interface PresencePayload {
   clientId: string;
   name: string;
+  color: string;
   slot: number | null;
   isHost: boolean;
 }

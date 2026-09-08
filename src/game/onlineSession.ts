@@ -18,6 +18,7 @@ export function createOnlineSession(): GameSession {
 export function applySnapshot(session: GameSession, payload: SnapshotPayload): boolean {
   const roundChanged = session.roundIndex !== payload.roundIndex || session.outlines.length === 0;
 
+  session.lastSnapshotAt = payload.hostNow;
   session.state = payload.state;
   session.roundIndex = payload.roundIndex;
   session.roundEndAt = payload.roundEndAt;
@@ -59,9 +60,10 @@ export function applyPaint(session: GameSession, payload: PaintBatchPayload): vo
     if (!outline) continue;
     if (event.kind === "splat") {
       outline.paintSplat(event.x, event.y, event.radius, event.color);
-      // Mirrors landProjectile's playSplat() on the host — a splat PaintEvent only ever exists
-      // because a blob just landed there, so the two are exactly equivalent, no guessing needed.
-      sound.playSplat();
+      // Mirrors landProjectile's playSplat()/playKaboom() choice on the host — a splat PaintEvent
+      // only ever exists because a blob just landed there, so the two are exactly equivalent.
+      if (event.isBigShot) sound.playKaboom();
+      else sound.playSplat();
     }
     else if (event.kind === "rect") outline.paintRect(event.x, event.y, event.w, event.h, event.color);
     else if (event.kind === "erase") outline.eraseColor(event.x, event.y, event.radius, event.excludeColor);

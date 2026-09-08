@@ -37,6 +37,15 @@ class HostInputSource implements InputSource {
       this.startRequested = false;
       return true;
     }
+    // MENU->start is (also) gated behind the explicit "Start Match" button above, but every other
+    // menu-style advance GameSession drives off this (VICTORY->GAME_OVER, GAME_OVER->MENU) has no
+    // button at all online — it was only ever reachable via requestStart(), which meant those
+    // screens were stuck forever online. Real held-paint state from the host and any guest now
+    // counts too, same as local play's InputManager.anyPaintPressed().
+    if (this.localInput.anyPaintPressed()) return true;
+    for (const state of this.guestStates.values()) {
+      if (state.paint) return true;
+    }
     return false;
   }
 

@@ -67,6 +67,36 @@ export function playSplat(): void {
   tone(90, 0, 0.12, "sine", 0.3);
 }
 
+/** A full-charge Big Shot landing — a bigger, deeper boom than a regular splat: a longer/louder
+ * noise burst under a low sub-bass thump. */
+export function playKaboom(): void {
+  const c = getCtx();
+  if (!master) return;
+  const src = c.createBufferSource();
+  src.buffer = getNoiseBuffer(c);
+  const filter = c.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(1800, c.currentTime);
+  filter.frequency.exponentialRampToValueAtTime(90, c.currentTime + 0.35);
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0.7, c.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.4);
+  src.connect(filter).connect(gain).connect(master);
+  src.start();
+  src.stop(c.currentTime + 0.42);
+
+  const boom = c.createOscillator();
+  const boomGain = c.createGain();
+  boom.type = "sine";
+  boom.frequency.setValueAtTime(140, c.currentTime);
+  boom.frequency.exponentialRampToValueAtTime(35, c.currentTime + 0.4);
+  boomGain.gain.setValueAtTime(0.6, c.currentTime);
+  boomGain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.45);
+  boom.connect(boomGain).connect(master);
+  boom.start();
+  boom.stop(c.currentTime + 0.47);
+}
+
 export function playClaim(): void {
   tone(660, 0, 0.12, "square", 0.2);
   tone(990, 0.08, 0.16, "square", 0.22);

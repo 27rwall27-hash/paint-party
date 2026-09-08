@@ -12,13 +12,19 @@ export function initOnlineUI(): void {
   const createBtn = document.querySelector<HTMLButtonElement>("#onlineCreateBtn");
   const joinBtn = document.querySelector<HTMLButtonElement>("#onlineJoinBtn");
   const joinCodeInput = document.querySelector<HTMLInputElement>("#onlineJoinCode");
+  const nameInput = document.querySelector<HTMLInputElement>("#onlineNameInput");
+  const colorInput = document.querySelector<HTMLInputElement>("#onlineColorInput");
   const startBtn = document.querySelector<HTMLButtonElement>("#onlineStartBtn");
   const status = document.querySelector<HTMLElement>("#onlineStatus");
   const playerList = document.querySelector<HTMLUListElement>("#onlinePlayerList");
-  if (!createBtn || !joinBtn || !joinCodeInput || !startBtn || !status || !playerList) return;
+  if (!createBtn || !joinBtn || !joinCodeInput || !nameInput || !colorInput || !startBtn || !status || !playerList) {
+    return;
+  }
   const statusEl = status;
   const playerListEl = playerList;
   const startBtnEl = startBtn;
+  const nameInputEl = nameInput;
+  const colorInputEl = colorInput;
 
   let client: NetworkClient | undefined;
   let hostLoop: HostGameLoop | undefined;
@@ -30,8 +36,21 @@ export function initOnlineUI(): void {
       .sort((a, b) => a.slot - b.slot);
     for (const p of seated) {
       const li = document.createElement("li");
-      li.textContent = `P${p.slot + 1}` + (p.clientId === client?.clientId ? " (you)" : "");
+      li.style.borderLeft = `4px solid ${p.color}`;
+      li.textContent = `${p.name || `P${p.slot + 1}`}` + (p.clientId === client?.clientId ? " (you)" : "");
       playerListEl.appendChild(li);
+    }
+
+    // Host-only: presence is the only place a guest's chosen name/color ever reaches the host's
+    // authoritative session — the regular snapshot broadcast then carries it on to everyone else
+    // (guests included) as a completely ordinary part of each Player object, no extra plumbing.
+    if (hostLoop) {
+      for (const p of seated) {
+        const player = hostLoop.session.players[p.slot];
+        if (!player) continue;
+        if (p.name) player.name = p.name;
+        if (p.color) player.color = p.color;
+      }
     }
   }
 
@@ -55,13 +74,15 @@ export function initOnlineUI(): void {
   }
 
   createBtn.addEventListener("click", () => {
+    const myName = nameInputEl.value.trim() || "P1";
+    const myColor = colorInputEl.value;
     statusEl.textContent = "Connecting…";
     try {
       const c = new NetworkClient();
       client = c;
       c.onPresenceSync(renderRoster);
-      void c.createRoom("Player").then((code) => {
-        statusEl.textContent = `Room ${code} — you're P1. Share the code with friends.`;
+      void c.createRoom(myName, myColor).then((code) => {
+        statusEl.textContent = `Room ${code} — you're ${myName}. Share the code with friends.`;
         beginHostSession(c);
       });
     } catch (err) {
@@ -72,6 +93,8 @@ export function initOnlineUI(): void {
   joinBtn.addEventListener("click", () => {
     const code = joinCodeInput.value.trim();
     if (!code) return;
+    const myName = nameInputEl.value.trim() || "Player";
+    const myColor = colorInputEl.value;
     // Guests never press a local "paint" key to unlock audio the way MENU->beginRound does for
     // host/local play (a guest's session never runs its own GameSession.update() — see
     // guestSound.ts) — this click is the one real user gesture in the whole join flow, so it's
@@ -83,7 +106,7 @@ export function initOnlineUI(): void {
       client = c;
       c.onPresenceSync(renderRoster);
       c.onSlotAssigned((slot) => {
-        statusEl.textContent = `Room ${code.toUpperCase()} — you're P${slot + 1}.`;
+        statusEl.textContent = `Room ${code.toUpperCase()} — you're ${myName}.`;
         onlineMode.mySlot = slot;
         beginGuestSession();
       });
@@ -118,7 +141,7 @@ export function initOnlineUI(): void {
       c.onPaint((payload) => {
         if (onlineMode.session) applyPaint(onlineMode.session, payload);
       });
-      c.joinRoom(code, "Player");
+      c.joinRoom(code, myName, myColor);
     } catch (err) {
       statusEl.textContent = err instanceof Error ? err.message : "Couldn't connect.";
     }

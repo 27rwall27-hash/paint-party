@@ -366,17 +366,26 @@ function drawEraserIcon(ctx: CanvasRenderingContext2D, x: number, y: number, siz
 }
 
 function drawErasers(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
+  // Guests only get a fresh eraser position every ~100ms (the throttled snapshot rate), which
+  // reads as visibly choppy for something moving this fast — extrapolate from its synced velocity
+  // for the time since that snapshot instead of leaving it frozen. A no-op for host/local
+  // (lastSnapshotAt is only ever set by applySnapshot), and only accurate between redirects
+  // (ERASER_REDIRECT_MS, much longer than the broadcast gap), same tradeoff RemoteInterpolator
+  // already makes for player movement.
+  const dt = session.lastSnapshotAt !== undefined ? Math.max(0, (now - session.lastSnapshotAt) / 1000) : 0;
   for (const eraser of session.erasers) {
+    const x = eraser.x + eraser.vx * dt;
+    const y = eraser.y + eraser.vy * dt;
     const spin = (now / 140) % (Math.PI * 2);
     ctx.save();
     ctx.globalAlpha = 0.18;
     ctx.fillStyle = "#ff3b6b";
     ctx.beginPath();
-    ctx.arc(eraser.x, eraser.y, eraser.radius, 0, Math.PI * 2);
+    ctx.arc(x, y, eraser.radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
-    drawEraserIcon(ctx, eraser.x, eraser.y, eraser.radius, spin);
+    drawEraserIcon(ctx, x, y, eraser.radius, spin);
   }
 }
 
@@ -754,7 +763,13 @@ const REVEAL_TRAVEL_MS = 550; // then floats up toward the leaderboard in the HU
  * animated effect in this file (impacts, projectiles, the curtain). A stroke outline keeps it
  * legible over whatever's already painted there, since there's no dimming panel behind it. */
 function drawResultsInPlaceReveal(ctx: CanvasRenderingContext2D, session: GameSession, elapsed: number): void {
-  const totalMs = REVEAL_HOLD_MS + REVEAL_TRAVEL_MS;
+  // Scaled down for fast (many-outline/finale) rounds, where steps land only a fraction of a
+  // second apart — at the original fixed duration, dozens of "+N" popups end up piling up on
+  // screen at once. Capped at the original duration for normal rounds (unchanged there) and
+  // floored so it's never so short the text becomes unreadable.
+  const totalMs = Math.max(500, Math.min(REVEAL_HOLD_MS + REVEAL_TRAVEL_MS, session.resultsPerOutlineMs * 2));
+  const holdMs = totalMs * (REVEAL_HOLD_MS / (REVEAL_HOLD_MS + REVEAL_TRAVEL_MS));
+  const travelMs = totalMs - holdMs;
   // boundingRadius is calibrated conservatively for overlap/collision checks, not visual size —
   // a tall thin custom shape can report one big enough to push "just above it" off the top of the
   // canvas entirely, so the hold position is clamped clear of the frame/HUD regardless of size.
@@ -773,12 +788,12 @@ function drawResultsInPlaceReveal(ctx: CanvasRenderingContext2D, session: GameSe
     let y: number;
     let scale: number;
     let alpha = 1;
-    if (local < REVEAL_HOLD_MS) {
-      const popT = Math.min(1, local / 200);
+    if (local < holdMs) {
+      const popT = Math.min(1, local / Math.min(200, holdMs));
       scale = 1 + 0.3 * Math.sin(popT * Math.PI);
       y = holdY;
     } else {
-      const travelT = (local - REVEAL_HOLD_MS) / REVEAL_TRAVEL_MS;
+      const travelT = (local - holdMs) / travelMs;
       const eased = travelT * travelT * (3 - 2 * travelT); // smoothstep
       y = holdY - (holdY - ARRIVAL_Y) * eased;
       scale = 1 - 0.35 * eased; // shrinks a little as it arrives, reads as receding toward the HUD

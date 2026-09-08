@@ -53,6 +53,9 @@ export const MIN_RADIUS = 8;
 export const DEFAULT_MAX_RADIUS = 42.78; // 46 * 0.93 (7% smaller)
 export const GROW_RATE = 60; // px/sec while paint held (charging)
 export const MOVE_SPEED = 338; // px/sec (30% faster than the original 260)
+// Cursors are frozen for this long once a round actually starts, so the "START!" flash has time
+// to register before anyone can react — paint charging still works during this window.
+export const MOVE_LOCK_MS = 250;
 
 export const SPLAT_INTERVAL_MS = 60; // machine-gun auto-fire cadence
 // A very slight cap on manual release-to-fire spamming — still ~7 shots/sec at the limit, clearly
@@ -95,9 +98,11 @@ export const ROUND_NUMBER_MS = 1300;
 export const CURTAIN_OPEN_MS = 1400;
 export const ROUND_INTRO_MS = ROUND_NUMBER_MS + CURTAIN_OPEN_MS;
 export const RESULTS_PER_OUTLINE_MS = 3100; // was 2600 — +500ms more pacing between each point reveal
-// A beat of silence after the "Finish!" cue before the score tallying starts — normal rounds only,
-// deliberately not applied to the finale's fast many-outline path below (its timing must stay put).
+// A beat of silence after the "Finish!" cue before the score tallying starts.
 export const RESULTS_TALLY_DELAY_MS = 1500;
+// The finale gets its own, shorter version of that same pause — its reveal cycles fast once it
+// starts, so the full normal-round delay would feel disproportionately long before anything happens.
+export const FINALE_TALLY_DELAY_MS = 1000;
 // Rounds with more outlines than this reveal much faster so a 30-outline finale doesn't drag on.
 export const RESULTS_MANY_OUTLINES_THRESHOLD = 10;
 export const RESULTS_MANY_OUTLINES_TOTAL_MS = 6500;
@@ -107,7 +112,7 @@ export const RESULTS_MANY_OUTLINES_TOTAL_MS = 6500;
 // open with continuous confetti for as long as players want, moving on to the final-scores screen
 // only once someone presses paint (no auto-timeout).
 export const VICTORY_CURTAIN_HOLD_MS = 1800;
-export const VICTORY_CURTAIN_OPEN_MS = 2200;
+export const VICTORY_CURTAIN_OPEN_MS = 1800; // was 2200 — a bit faster than the suspense-hold beat
 
 export const DEFAULT_POINTS_BY_RANK = [3, 2, 1, 0];
 export const FINALE_POINTS_BY_RANK = [1, 0.5, 0.25, 0];
@@ -155,7 +160,7 @@ export const ERASER_SPLIT_SPEED_MULT = 1.15; // 15% faster than ERASER_SPEED
 // Custom shapes read better a bit bigger than their built-in fallback's base radius.
 export const CUSTOM_SHAPE_SIZE_BOOST = 1.3;
 
-export const BIGSHOT_MULTIPLIER = 1.875; // next splat only (1.5 * 1.25)
+export const BIGSHOT_MULTIPLIER = 2.0625; // next splat only (1.5 * 1.25 * 1.1 — +10% bigger)
 
 export const CONFUSE_DURATION_MS = 3500;
 export const CONFUSE_REDIRECT_MS = 400; // how often a confused player's forced heading changes

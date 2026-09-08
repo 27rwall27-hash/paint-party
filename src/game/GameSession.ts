@@ -30,12 +30,15 @@ import {
   POWERUP_SPAWN_MAX_MS,
   POWERUP_SPAWN_MIN_MS,
   PROJECTILE_DURATION_MS,
+  FINALE_TALLY_DELAY_MS,
+  MOVE_LOCK_MS,
   RESULTS_LEADERBOARD_MS,
   RESULTS_MANY_OUTLINES_THRESHOLD,
   RESULTS_MANY_OUTLINES_TOTAL_MS,
   RESULTS_PER_OUTLINE_MS,
   RESULTS_TALLY_DELAY_MS,
   ROUND_INTRO_MS,
+  ROUND_NUMBER_MS,
   SHRINK_DURATION_MS,
   SPLAT_INTERVAL_MS,
   SWEEP_BAND_HEIGHT,
@@ -49,7 +52,7 @@ import {
 import type { PlayerInputState } from "./Input.ts";
 import { Outline, Powerup } from "./Outline.ts";
 import { spawnOnePowerup } from "./Powerup.ts";
-import { createPlayers, isMachineGunActive, resetForRound, updatePlayer, type Player } from "./Player.ts";
+import { createPlayers, currentMaxRadius, isMachineGunActive, resetForRound, updatePlayer, type Player } from "./Player.ts";
 import { computeRoundResults, type OutlineResult } from "./scoring.ts";
 import { ROUNDS } from "./rounds.ts";
 
@@ -74,6 +77,8 @@ export interface SoundHooks {
   setUrgent(urgent: boolean): void;
   playTick(): void;
   playSplat(): void;
+  /** A full-charge Big Shot landing — bigger and more dramatic than a regular splat. */
+  playKaboom(): void;
   playClaim(): void;
   setRoundSpeed(roundIndex: number): void;
   playCurtain(): void;
@@ -97,6 +102,7 @@ const noopSound: SoundHooks = {
   setUrgent() {},
   playTick() {},
   playSplat() {},
+  playKaboom() {},
   playClaim() {},
   setRoundSpeed() {},
   playCurtain() {},
@@ -113,7 +119,7 @@ const noopSound: SoundHooks = {
 /** Emitted whenever an Outline's paint canvas actually changes, so a server can broadcast just
  * the paint action (not pixels) for clients to replay locally on their own canvases. */
 export type PaintEvent =
-  | { kind: "splat"; outlineIndex: number; x: number; y: number; radius: number; color: string }
+  | { kind: "splat"; outlineIndex: number; x: number; y: number; radius: number; color: string; isBigShot: boolean }
   | { kind: "rect"; outlineIndex: number; x: number; y: number; w: number; h: number; color: string }
   | { kind: "erase"; outlineIndex: number; x: number; y: number; radius: number; excludeColor: string }
   | { kind: "clear"; outlineIndex: number; color: string; fraction: number };
@@ -149,6 +155,8 @@ export interface Projectile {
   radius: number;
   color: string;
   startedAt: number;
+  /** True only for a Big Shot fired at full charge — the "kaboom" shot, gets its own landing cue. */
+  isBigShot: boolean;
 }
 
 export interface Eraser {
@@ -208,6 +216,12 @@ export class GameSession {
   players: Player[] = createPlayers();
   state: GameState = "MENU";
   stateEnteredAt = 0;
+  /** Guest-only: the host's clock time (hostNow) as of the last applied snapshot — undefined for
+   * a host/local session, which is always fully up to date on its own. render.ts uses this to
+   * extrapolate erasers' positions from their synced velocity between snapshots instead of
+   * leaving them frozen until the next one arrives, which reads as visibly choppy at the
+   * broadcast's ~10Hz rate. See onlineSession.ts's applySnapshot. */
+  lastSnapshotAt: number | undefined;
   roundIndex = -1;
   roundEndAt = 0;
   outlines: Outline[] = [];
@@ -230,6 +244,8 @@ export class GameSession {
   revealedCount = 0;
   /** Whether the victory theme has taken over from the drum roll yet this VICTORY state. */
   private victoryRevealed = false;
+  /** Whether the curtain-opening swish has already fired this ROUND_INTRO. */
+  private curtainSoundPlayed = false;
   /** Raw "is any paint key currently held" from last frame — used to edge-detect a fresh press
    * for menu-style state advances (see update()), independent of Player.wasPaintHeld's per-player
    * charge/release tracking used during PLAYING. */
@@ -265,8 +281,16 @@ export class GameSession {
           this.beginRound(0, now);
         }
         break;
-      case "ROUND_INTRO":
-        if (now - this.stateEnteredAt >= ROUND_INTRO_MS) {
+      case "ROUND_INTRO": {
+        const introElapsed = now - this.stateEnteredAt;
+        // The curtain sits closed showing the round number for ROUND_NUMBER_MS before it actually
+        // starts opening — the swish sound needs to fire at that same moment, not at the instant
+        // this state begins (which used to play it a beat before the curtain visibly moved at all).
+        if (!this.curtainSoundPlayed && introElapsed >= ROUND_NUMBER_MS) {
+          this.curtainSoundPlayed = true;
+          this.sound.playCurtain();
+        }
+        if (introElapsed >= ROUND_INTRO_MS) {
           this.state = "PLAYING";
           this.roundEndAt = now + (this.round?.durationMs ?? 30000);
           this.stateEnteredAt = now;
@@ -274,6 +298,7 @@ export class GameSession {
           this.sound.startMusic();
         }
         break;
+      }
       case "PLAYING":
         this.updatePlaying(dt, now, input);
         break;
@@ -339,17 +364,26 @@ export class GameSession {
     this.resultsRevealEndMs = 0;
     this.state = "ROUND_INTRO";
     this.stateEnteredAt = now;
+    this.curtainSoundPlayed = false;
     this.sound.setUrgent(false);
     this.sound.setRoundSpeed(index);
-    this.sound.playCurtain();
   }
 
   private updatePlaying(dt: number, now: number, input: InputSource): void {
+    // Cursors are frozen for the first stretch of a round — right through the "START!" flash —
+    // so it actually registers before anyone can react. Paint charging still works; only movement
+    // is held back, and only for the movement/clamp step inside updatePlayer.
+    const moveLocked = now - this.stateEnteredAt < MOVE_LOCK_MS;
     for (const player of this.players) {
       const keys = PLAYER_KEYS[player.id]!;
       const playerInput = input.getInput(keys);
       const mgActive = isMachineGunActive(player, now);
-      updatePlayer(player, playerInput, dt, now);
+      updatePlayer(
+        player,
+        moveLocked ? { ...playerInput, up: false, down: false, left: false, right: false } : playerInput,
+        dt,
+        now,
+      );
 
       if (mgActive) {
         if (now - player.lastSplatAt >= SPLAT_INTERVAL_MS) {
@@ -422,6 +456,9 @@ export class GameSession {
     const muzzleY = GUN_BASE_Y + Math.sin(angle) * GUN_LENGTH;
 
     let shotRadius = radius;
+    // "Fired at max power" — a fully-charged shot (not the machine gun, which always fires at
+    // MIN_RADIUS) with Big Shot active — gets its own dramatic landing cue instead of a plain splat.
+    const isBigShot = player.bigShotPending && radius >= currentMaxRadius(player, now);
     if (player.bigShotPending) {
       shotRadius *= BIGSHOT_MULTIPLIER;
       player.bigShotPending = false;
@@ -436,6 +473,7 @@ export class GameSession {
       radius: shotRadius,
       color: player.color,
       startedAt: now,
+      isBigShot,
     });
   }
 
@@ -453,11 +491,20 @@ export class GameSession {
     for (const [i, outline] of this.outlines.entries()) {
       if (outline.mayOverlap(proj.x, proj.y, proj.radius)) {
         outline.paintSplat(proj.x, proj.y, proj.radius, proj.color);
-        this.onPaint?.({ kind: "splat", outlineIndex: i, x: proj.x, y: proj.y, radius: proj.radius, color: proj.color });
+        this.onPaint?.({
+          kind: "splat",
+          outlineIndex: i,
+          x: proj.x,
+          y: proj.y,
+          radius: proj.radius,
+          color: proj.color,
+          isBigShot: proj.isBigShot,
+        });
       }
     }
     this.impacts.push({ x: proj.x, y: proj.y, color: proj.color, radius: proj.radius, at: now });
-    this.sound.playSplat();
+    if (proj.isBigShot) this.sound.playKaboom();
+    else this.sound.playSplat();
     const hit = this.powerups.find(
       (p) => p.state === "active" && p.overlaps(proj.x, proj.y, proj.radius, POWERUP_CLAIM_SLACK),
     );
@@ -615,9 +662,9 @@ export class GameSession {
     this.resultsPerOutlineMs = manyOutlines
       ? Math.max(120, RESULTS_MANY_OUTLINES_TOTAL_MS / n)
       : RESULTS_PER_OUTLINE_MS;
-    // The finale's fast many-outline reveal is intentionally left exactly as it was — the tally
-    // delay is a normal-round-only pause between the "Finish!" cue and the score reveal starting.
-    const tallyDelayMs = manyOutlines ? 0 : RESULTS_TALLY_DELAY_MS;
+    // The finale gets its own (shorter) pause between "Finish!" and the reveal starting — its
+    // reveal cycles fast once it begins, so a full normal-round delay would feel disproportionate.
+    const tallyDelayMs = manyOutlines ? FINALE_TALLY_DELAY_MS : RESULTS_TALLY_DELAY_MS;
     this.resultsRevealEndMs = n > 0 ? tallyDelayMs + n * this.resultsPerOutlineMs : 0;
     // After the reveal: curtain closes, a leaderboard holds on the closed curtain, then it's gone
     // — the next state (round intro, or victory after the finale) picks up from a closed curtain.

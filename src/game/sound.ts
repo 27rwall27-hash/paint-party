@@ -8,12 +8,16 @@
 import * as audio from "./audio.ts";
 import { loadCustomAudio, type CustomAudioSet } from "./customAudio.ts";
 
-const DEFAULT_VOLUME = { music: 0.35, start: 0.5, finish: 0.5, victory: 0.5, drumroll: 0.55 };
+// music/start/finish are 22% quieter than their original levels (0.35/0.5/0.5).
+const DEFAULT_VOLUME = { music: 0.273, start: 0.39, finish: 0.39, victory: 0.5, drumroll: 0.55 };
 
 let custom: CustomAudioSet = { music: null, start: null, finish: null, victory: null, drumroll: null };
 let musicStarted = false;
 
 export function init(): void {
+  // Only the synthesized fallback music loop has a separate volume knob from DEFAULT_VOLUME.music
+  // (which only applies to a dropped-in music.wav) — matching the same 22% reduction here too.
+  audio.setMusicVolume(0.78);
   void loadCustomAudio().then((loaded) => {
     custom = loaded;
     if (custom.music) {
@@ -146,6 +150,10 @@ export function stopDrumroll(): void {
 
 export function playSplat(): void {
   audio.playSplat();
+}
+
+export function playKaboom(): void {
+  audio.playKaboom();
 }
 
 export function playClaim(): void {

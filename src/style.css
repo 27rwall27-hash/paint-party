@@ -121,7 +121,8 @@ body {
   image-rendering: crisp-edges;
 }
 
-#online {
+#online,
+#playerSetup {
   width: 100%;
   background: #241f29;
   color: #eee;
@@ -130,7 +131,8 @@ body {
   font-size: 14px;
 }
 
-#online summary {
+#online summary,
+#playerSetup summary {
   cursor: pointer;
   font-weight: 700;
   color: #ffd60a;
@@ -142,7 +144,8 @@ body {
   line-height: 1.4;
 }
 
-#online input {
+#online input,
+#playerSetup input {
   font: inherit;
   padding: 6px 8px;
   border-radius: 6px;
@@ -160,6 +163,14 @@ body {
 
 .settingsRow input[type="text"] {
   flex: 1 1 260px;
+}
+
+.settingsRow input[type="color"] {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 32px;
+  padding: 2px;
+  cursor: pointer;
 }
 
 #onlineCreateBtn,
