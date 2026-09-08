@@ -1,4 +1,4 @@
-import { CANVAS_H, CANVAS_W, CUSTOM_SHAPE_SIZE_BOOST, FINALE_POINTS_BY_RANK } from "./constants.ts";
+import { BIG_ONE_POINTS_BY_RANK, CANVAS_H, CANVAS_W, CUSTOM_SHAPE_SIZE_BOOST, FINALE_POINTS_BY_RANK } from "./constants.ts";
 import { CUSTOM_SHAPE_IDS } from "./customShapes.ts";
 import type { OutlineSpec } from "./Outline.ts";
 import type { ShapeKind } from "./shapes.ts";
@@ -105,10 +105,12 @@ export const ROUNDS: RoundConfig[] = [
     durationMs: 38000,
   },
   {
+    // "The big one" — a single giant target, so it pays out bigger too.
     outlines: [{ kind: "rectangle", cx: CX, cy: CY, radius: 0, width: CANVAS_W - 160, height: CANVAS_H - 180 }],
     powerupCountRange: [4, 6],
     concurrentPowerups: 3,
     durationMs: 30000,
+    pointsByRank: BIG_ONE_POINTS_BY_RANK,
   },
   {
     outlines: scatterOutlines(30, 26, FINALE_KINDS, { Eiffel: 1.1, Pisa: 1.5 }),

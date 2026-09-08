@@ -605,6 +605,10 @@ export class GameSession {
   }
 
   private finishRound(now: number): void {
+    // Any blob still mid-flight when the timer hits zero never gets to land — it hasn't painted
+    // anything yet (that only happens in updateProjectiles/landProjectile, which won't run again
+    // once we leave PLAYING), so just dropping it here is enough; nothing to undo.
+    this.projectiles = [];
     this.lastResults = computeRoundResults(this.outlines, this.players, this.round?.pointsByRank);
     const n = this.lastResults.length;
     const manyOutlines = n > RESULTS_MANY_OUTLINES_THRESHOLD;

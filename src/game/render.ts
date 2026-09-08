@@ -93,9 +93,17 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
   drawSweeps(ctx, session, now);
   drawErasers(ctx, session, now);
   drawImpacts(ctx, session, now);
-  drawProjectiles(ctx, session, now);
-  drawPaintGuns(ctx, session);
-  drawCursors(ctx, session, now);
+
+  // Once the round timer ends, cursors, paint guns, and any blob still mid-flight are hidden so
+  // the finished painting is fully visible during the results reveal — finishRound() also clears
+  // out any not-yet-landed projectiles outright, so a late splat can't sneak in afterward.
+  if (session.state !== "ROUND_RESULTS" && session.state !== "GAME_OVER") {
+    drawProjectiles(ctx, session, now);
+    drawPaintGuns(ctx, session);
+    drawCursors(ctx, session, now);
+  }
+
+  drawAnnounceText(ctx, session, now);
 
   // The point-reveal ("+N") draws while the board is still fully visible, before the curtain has
   // any part in this state — everything after that (the closing curtain and what's shown on it)
@@ -666,6 +674,49 @@ function drawConfetti(ctx: CanvasRenderingContext2D, elapsed: number): void {
   }
 }
 
+const ANNOUNCE_FLASH_MS = 900;
+const ANNOUNCE_POP_MS = 180;
+const ANNOUNCE_FADE_MS = 250;
+const ANNOUNCE_COLOR = "#8b0000"; // deep red
+
+/** Big "START!"/"FINISH!" text flashed across the board right as the announcer says it — a quick
+ * pop in, a hold, then a fade out, purely a function of elapsed time since the state that cue
+ * belongs to began (PLAYING for "START!", ROUND_RESULTS for "FINISH!" — both fire their sound cue
+ * at that same instant, see GameSession), same pattern as every other timed effect in this file. */
+function drawAnnounceText(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
+  let word: string | null = null;
+  let elapsed = 0;
+  if (session.state === "PLAYING") {
+    elapsed = now - session.stateEnteredAt;
+    if (elapsed < ANNOUNCE_FLASH_MS) word = "START!";
+  } else if (session.state === "ROUND_RESULTS") {
+    elapsed = now - session.stateEnteredAt;
+    if (elapsed < ANNOUNCE_FLASH_MS) word = "FINISH!";
+  }
+  if (!word) return;
+
+  let scale = 1;
+  if (elapsed < ANNOUNCE_POP_MS) {
+    const popT = elapsed / ANNOUNCE_POP_MS;
+    scale = 0.5 + 0.5 * Math.sin((popT * Math.PI) / 2);
+  }
+  let alpha = 1;
+  if (elapsed > ANNOUNCE_FLASH_MS - ANNOUNCE_FADE_MS) {
+    alpha = Math.max(0, (ANNOUNCE_FLASH_MS - elapsed) / ANNOUNCE_FADE_MS);
+  }
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.textAlign = "center";
+  ctx.font = `bold ${Math.round(100 * scale)}px 'Segoe UI', sans-serif`;
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = "#1a1520";
+  ctx.strokeText(word, CANVAS_W / 2, CANVAS_H / 2 + 20);
+  ctx.fillStyle = ANNOUNCE_COLOR;
+  ctx.fillText(word, CANVAS_W / 2, CANVAS_H / 2 + 20);
+  ctx.restore();
+}
+
 /** Phase 1 of ROUND_RESULTS: the in-place "+N" point reveal, drawn while the board is still fully
  * visible (called before drawFrame/the curtain — see render()). A no-op once the reveal phase is
  * over (session.resultsRevealEndMs), so this and drawResultsCurtain never draw at the same time. */
@@ -750,34 +801,39 @@ function drawResultsInPlaceReveal(ctx: CanvasRenderingContext2D, session: GameSe
 const LEADERBOARD_FADE_MS = 250;
 
 /** The standings, shown on the fully closed curtain between rounds — fades in, holds, fades out.
- * The finale keeps the standings a secret right up to the "Player X Wins!" reveal, so it shows the
- * same vague suspense message it always has instead of real scores for that one round. */
+ * The finale keeps the standings a secret right up to the "Player X Wins!" reveal, so this phase
+ * is just a quiet pause on the closed curtain for that one round — nothing drawn at all. */
 function drawResultsLeaderboard(ctx: CanvasRenderingContext2D, session: GameSession, elapsed: number): void {
+  if (session.roundIndex === ROUNDS.length - 1) return;
+
   let alpha = 1;
   if (elapsed < LEADERBOARD_FADE_MS) alpha = elapsed / LEADERBOARD_FADE_MS;
   else if (elapsed > RESULTS_LEADERBOARD_MS - LEADERBOARD_FADE_MS) {
     alpha = Math.max(0, (RESULTS_LEADERBOARD_MS - elapsed) / LEADERBOARD_FADE_MS);
   }
 
+  const sorted = [...session.players].sort((a, b) => b.score - a.score);
+  const topScore = sorted[0]?.score ?? 0;
+
   ctx.save();
   ctx.globalAlpha = alpha;
+
+  // A soft translucent card behind the text — the striped velvet underneath makes plain text hard
+  // to read on its own, especially the fainter non-leader rows.
+  const panelW = 420;
+  const panelH = 90 + sorted.length * 60;
+  const panelX = CANVAS_W / 2 - panelW / 2;
+  const panelY = 90;
+  ctx.fillStyle = "rgba(20,17,24,0.45)";
+  ctx.beginPath();
+  ctx.roundRect(panelX, panelY, panelW, panelH, 18);
+  ctx.fill();
+
   ctx.textAlign = "center";
   ctx.fillStyle = "#fff";
   ctx.font = "bold 36px 'Segoe UI', sans-serif";
-
-  if (session.roundIndex === ROUNDS.length - 1) {
-    ctx.fillText("Final Scores Are In...", CANVAS_W / 2, 130);
-    ctx.font = "22px 'Segoe UI', sans-serif";
-    ctx.fillStyle = "rgba(255,255,255,0.75)";
-    ctx.fillText("The results are revealed after the curtain falls.", CANVAS_W / 2, 190);
-    ctx.restore();
-    return;
-  }
-
   ctx.fillText("Leaderboard", CANVAS_W / 2, 130);
 
-  const sorted = [...session.players].sort((a, b) => b.score - a.score);
-  const topScore = sorted[0]?.score ?? 0;
   sorted.forEach((player, i) => {
     const isLeader = topScore > 0 && player.score === topScore;
     const y = 210 + i * 60;
@@ -812,20 +868,33 @@ function drawVictory(ctx: CanvasRenderingContext2D, session: GameSession, now: n
   // spotlight (dims everything but the text) rather than a faint glow — a plain white glow was
   // nearly invisible against the light canvas background underneath.
   const spotlightY = CANVAS_H / 2 + 10;
-  const vignette = ctx.createRadialGradient(CANVAS_W / 2, spotlightY, 40, CANVAS_W / 2, spotlightY, 480);
+  const vignette = ctx.createRadialGradient(CANVAS_W / 2, spotlightY, 60, CANVAS_W / 2, spotlightY, 640);
   vignette.addColorStop(0, "rgba(10,8,16,0)");
   vignette.addColorStop(0.45, "rgba(10,8,16,0.35)");
   vignette.addColorStop(1, "rgba(10,8,16,0.82)");
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
+  // Same dashed-outline-then-filled treatment as the paintable shapes elsewhere on the board — a
+  // sketchy outline stroke with the winner's color filled in on top, like a finished painting —
+  // sized as big as it can go without overflowing the canvas.
   ctx.textAlign = "center";
-  ctx.font = "bold 66px 'Segoe UI', sans-serif";
-  ctx.lineWidth = 7;
-  ctx.strokeStyle = "#1a1520";
-  ctx.strokeText(text, CANVAS_W / 2, CANVAS_H / 2 + 22);
+  let fontSize = 150;
+  const maxTextWidth = CANVAS_W - 140;
+  ctx.font = `bold ${fontSize}px 'Segoe UI', sans-serif`;
+  while (ctx.measureText(text).width > maxTextWidth && fontSize > 48) {
+    fontSize -= 4;
+    ctx.font = `bold ${fontSize}px 'Segoe UI', sans-serif`;
+  }
+
+  const textY = CANVAS_H / 2 + 22;
+  ctx.lineWidth = Math.max(4, fontSize * 0.07);
+  ctx.setLineDash([fontSize * 0.14, fontSize * 0.09]);
+  ctx.strokeStyle = "#241f29";
+  ctx.strokeText(text, CANVAS_W / 2, textY);
+  ctx.setLineDash([]);
   ctx.fillStyle = winnerColor;
-  ctx.fillText(text, CANVAS_W / 2, CANVAS_H / 2 + 22);
+  ctx.fillText(text, CANVAS_W / 2, textY);
   ctx.restore();
 
   drawCurtainPanels(ctx, 1 - progress);

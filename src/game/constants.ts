@@ -111,6 +111,8 @@ export const VICTORY_CURTAIN_OPEN_MS = 2200;
 
 export const DEFAULT_POINTS_BY_RANK = [3, 2, 1, 0];
 export const FINALE_POINTS_BY_RANK = [1, 0.5, 0.25, 0];
+// "The big one" — the single giant-rectangle round — pays out bigger to match its higher stakes.
+export const BIG_ONE_POINTS_BY_RANK = [5, 3, 1, 0];
 
 // Release-to-fire paint blob
 export const PROJECTILE_DURATION_MS = 380;
