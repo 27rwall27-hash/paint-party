@@ -1,6 +1,6 @@
 import { NetworkClient } from "./NetworkClient.ts";
 import { applyPaint, applySnapshot, createOnlineSession } from "./onlineSession.ts";
-import { onlineMode } from "./onlineMode.ts";
+import { onlineMode, onlineNow } from "./onlineMode.ts";
 import { HostGameLoop } from "./hostLoop.ts";
 import { PredictedPlayer } from "./predictedPlayer.ts";
 import { RemoteInterpolator } from "./interpolation.ts";
@@ -84,6 +84,13 @@ export function initOnlineUI(): void {
       });
       c.onSnapshot((payload) => {
         if (!onlineMode.session) return;
+
+        // Estimate (host clock - my clock) from this snapshot's send time, smoothed a bit so a
+        // single slow/fast round trip doesn't yank "now" around frame to frame.
+        const offsetSample = payload.hostNow - Date.now();
+        onlineMode.clockOffset =
+          onlineMode.clockOffset === undefined ? offsetSample : onlineMode.clockOffset * 0.8 + offsetSample * 0.2;
+
         const roundChanged = applySnapshot(onlineMode.session, payload);
         if (onlineMode.mySlot !== undefined) {
           const authoritative = payload.players[onlineMode.mySlot];
@@ -93,7 +100,7 @@ export function initOnlineUI(): void {
           }
         }
         if (onlineMode.interpolator) {
-          const now = Date.now();
+          const now = onlineNow();
           for (const p of payload.players) {
             if (p.id !== onlineMode.mySlot) onlineMode.interpolator.onSnapshot(p.id, p.x, p.y, now);
           }

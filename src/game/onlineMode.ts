@@ -21,6 +21,12 @@ export interface OnlineMode {
    * for display) so PredictedPlayer always reconciles against real network truth, never against
    * its own previous prediction. */
   lastAuthoritativePlayer: Player | undefined;
+  /** Guest-only: estimated (host clock - my clock), so guest-side "now" can be adjusted to match
+   * the host's clock domain before comparing against host-stamped timestamps. Two different
+   * physical machines' clocks are never guaranteed to agree — this is not optional polish, a
+   * meaningfully-skewed guest clock produces negative elapsed times that break animation math and
+   * can throw (see hostNow in netProtocol.ts). Undefined until the first snapshot arrives. */
+  clockOffset: number | undefined;
 }
 
 export const onlineMode: OnlineMode = {
@@ -32,4 +38,12 @@ export const onlineMode: OnlineMode = {
   predictedPlayer: undefined,
   interpolator: undefined,
   lastAuthoritativePlayer: undefined,
+  clockOffset: undefined,
 };
+
+/** Guest-only: "now" adjusted into the host's clock domain — use this instead of raw Date.now()
+ * anywhere a guest compares against host-stamped session timestamps. Host role always returns
+ * raw Date.now() (it IS the clock authority, offset is always 0 for itself). */
+export function onlineNow(): number {
+  return Date.now() + (onlineMode.role === "guest" ? (onlineMode.clockOffset ?? 0) : 0);
+}

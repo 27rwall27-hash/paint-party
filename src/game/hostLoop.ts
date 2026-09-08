@@ -85,7 +85,7 @@ export class HostGameLoop {
 
     this.tickCount++;
     if (this.tickCount % BROADCAST_EVERY_N_TICKS === 0) {
-      this.broadcastSnapshot();
+      this.broadcastSnapshot(now);
       if (this.pendingPaint.length > 0) {
         this.client.broadcastPaint({ events: this.pendingPaint });
         this.pendingPaint = [];
@@ -93,9 +93,10 @@ export class HostGameLoop {
     }
   }
 
-  private broadcastSnapshot(): void {
+  private broadcastSnapshot(now: number): void {
     const cfg = ROUNDS[this.session.roundIndex];
     const payload: SnapshotPayload = {
+      hostNow: now,
       state: this.session.state,
       roundIndex: this.session.roundIndex,
       roundEndAt: this.session.roundEndAt,

@@ -5,7 +5,7 @@ import { render } from "./game/render.ts";
 import * as sound from "./game/sound.ts";
 import { initSettingsUI } from "./game/settings.ts";
 import { initOnlineUI } from "./game/onlineUI.ts";
-import { onlineMode } from "./game/onlineMode.ts";
+import { onlineMode, onlineNow } from "./game/onlineMode.ts";
 import { PLAYER_DEFS } from "./game/constants.ts";
 
 sound.init();
@@ -25,11 +25,15 @@ function loop(time: number): void {
   lastTime = time;
 
   if (onlineMode.active && onlineMode.session) {
-    // Online play's session timestamps come from the host's setInterval tick, which uses
-    // wall-clock Date.now() — never requestAnimationFrame's unrelated performance.now(). render()
-    // needs "now" in that same clock domain or every elapsed-time calculation comes out wildly
-    // wrong (this exact mismatch once froze the tab in an earlier design — see hostLoop.ts).
-    const now = Date.now();
+    // Online play's session timestamps come from the HOST's wall clock (Date.now(), never
+    // requestAnimationFrame's unrelated performance.now() — that mismatch once froze the tab in
+    // an earlier design). But two different physical machines' clocks also aren't guaranteed to
+    // agree with each other, sometimes by seconds — onlineNow() adjusts a guest's own Date.now()
+    // by an estimated offset so it lines up with the host's clock; the host IS that clock, so it
+    // gets back plain Date.now() unchanged. Skipping this produces negative elapsed times (e.g. a
+    // projectile's startedAt looking like it's "in the future"), which breaks animation math and
+    // can throw outright (a negative radius reaching a canvas draw call).
+    const now = onlineNow();
 
     if (onlineMode.role === "guest") {
       const localInput = input.getInput(PLAYER_DEFS[0]!.keys);

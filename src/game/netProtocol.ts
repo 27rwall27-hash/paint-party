@@ -66,6 +66,14 @@ export interface InputPayload {
 /** Host -> all: a full snapshot of session state, broadcast on a throttled schedule (not every
  * simulation tick) to conserve Realtime message volume — guests interpolate between snapshots. */
 export interface SnapshotPayload {
+  /** The host's own Date.now() at broadcast time — two different physical machines' clocks can
+   * disagree by anywhere from milliseconds to whole seconds (no NTP guarantee), and every other
+   * timestamp in this payload is stamped using the host's clock. Guests use this to estimate a
+   * clock offset and adjust their own Date.now() before comparing against those timestamps —
+   * without it, a guest running behind the host's clock can see negative elapsed times (e.g. a
+   * projectile whose startedAt is "in the future" from the guest's point of view), which breaks
+   * time-based animation math and can throw (a negative radius passed to a canvas draw call). */
+  hostNow: number;
   state: GameState;
   roundIndex: number;
   roundEndAt: number;
