@@ -30,8 +30,10 @@ export const THREE_WAY_PHASE_MS = 27_000;
 // are pure setup, no scoring.
 export const POINTS_BY_RANK: number[] = [10, 8, 6, 5, 4, 3, 1, 0];
 
-// How long a jump keeps a racer airborne (and thus safe from the current obstacle) once triggered.
-export const JUMP_AIRTIME_MS = 550;
+// How long a jump keeps a racer airborne (and thus safe from the current obstacle) once triggered
+// — 550 * 1.3, a deliberately generous tolerance bump so mistimed-but-close clicks/CPU jumps
+// still clear the obstacle more often.
+export const JUMP_AIRTIME_MS = 715;
 // A jump's upward arc peaks at this fraction of the way through its airtime.
 export const JUMP_ARC_HEIGHT_PX = 46;
 
@@ -90,6 +92,17 @@ export const PACK_WIDTH_FRACTION = 0.42;
 // first, all in one motion) takes a bit over 2 seconds to visibly settle instead of happening in
 // a single frame.
 export const SLIDE_SPEED_SLOTS_PER_SEC = 3;
+
+// A racer who fails doesn't reorder (or even start sliding to their new last-place spot)
+// immediately — that used to mean rank changes trickled out DURING a sweep, so a racer's own
+// column could shift out from under them mid-obstacle for a reason that had nothing to do with
+// their own jump. Instead a failure now only flies that one racer's drawn position OFF-SCREEN to
+// the left (fast — see KNOCKOUT_FLY_SPEED_SLOTS_PER_SEC), and the ENTIRE wave's actual rank
+// reordering happens as one batch once every racer has been resolved (see updateRace) — only
+// then do the knocked-out racers reappear from off-screen and everyone (not just them) glides to
+// their real new position together.
+export const KNOCKOUT_OFFSCREEN_SLOT = -2.5;
+export const KNOCKOUT_FLY_SPEED_SLOTS_PER_SEC = 14;
 
 // Per-identity base jump-success chance, randomized once at game start within this range — most
 // CPUs usually clear a jump but occasionally fail, giving the human a real chance without making

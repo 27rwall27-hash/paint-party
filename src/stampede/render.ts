@@ -73,12 +73,14 @@ function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number,
   ctx.restore();
 }
 
-/** A small triangular spike sitting on the ground line, tip up — placeholder obstacle shape. */
-function drawSpike(ctx: CanvasRenderingContext2D, x: number, groundY: number, size: number): void {
+/** A small triangular spike sitting on the ground line, tip up — placeholder obstacle shape.
+ * `groundLineY` is where the ground line is actually DRAWN (groundY + radius + 4 in drawRace,
+ * not groundY itself — groundY is the runners' own center point, a few px above their feet). */
+function drawSpike(ctx: CanvasRenderingContext2D, x: number, groundLineY: number, size: number): void {
   ctx.beginPath();
-  ctx.moveTo(x, groundY - size * 1.6);
-  ctx.lineTo(x - size, groundY + 2);
-  ctx.lineTo(x + size, groundY + 2);
+  ctx.moveTo(x, groundLineY - size * 1.8);
+  ctx.lineTo(x - size, groundLineY);
+  ctx.lineTo(x + size, groundLineY);
   ctx.closePath();
   ctx.fillStyle = "#8a6d3b";
   ctx.fill();
@@ -98,11 +100,12 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   // convention as the original endless-runner this is modeled on.
   const groundY = y + h * GROUND_Y_FRACTION;
   const radius = Math.min(colWidth * 0.28, 17);
+  const groundLineY = groundY + radius + 4;
 
   ctx.strokeStyle = "rgba(255,255,255,0.12)";
   ctx.beginPath();
-  ctx.moveTo(0, groundY + radius + 4);
-  ctx.lineTo(CANVAS_W, groundY + radius + 4);
+  ctx.moveTo(0, groundLineY);
+  ctx.lineTo(CANVAS_W, groundLineY);
   ctx.stroke();
 
   const slotX = (slot: number) => packLeft + slot * (colWidth + COLUMN_GAP) + colWidth / 2;
@@ -116,7 +119,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     const spawnX = CANVAS_W - 24;
     const targetX = slotX(0);
     const obstacleX = spawnX + progress * (targetX - spawnX);
-    drawSpike(ctx, obstacleX, groundY, Math.max(7, radius * 0.55));
+    drawSpike(ctx, obstacleX, groundLineY, Math.max(7, radius * 0.55));
   }
 
   race.racers.forEach((racer, rank) => {

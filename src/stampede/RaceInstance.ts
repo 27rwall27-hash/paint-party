@@ -3,6 +3,8 @@ import {
   CPU_BASE_SKILL_MIN,
   CPU_SKILL_JITTER,
   JUMP_AIRTIME_MS,
+  KNOCKOUT_FLY_SPEED_SLOTS_PER_SEC,
+  KNOCKOUT_OFFSCREEN_SLOT,
   PHASE_BASE_COLUMN_GAP_MS,
   PHASE_BASE_LEAD_IN_MS,
   PHASE_BASE_SPAWN_MS,
@@ -33,6 +35,10 @@ export interface RaceRacerState {
    * make every racer behind it teleport sideways on the same frame. render.ts reads this directly
    * instead of recomputing a column index fresh from rank every frame. */
   displaySlot: number;
+  /** True from the instant this racer fails a jump until the whole wave finishes and rank
+   * reordering actually happens (see updateRace) — while true, this racer's displaySlot targets
+   * an off-screen position instead of their (still pre-failure) rank, and slides there fast. */
+  knockedOutThisWave: boolean;
 }
 
 export function isAirborne(racer: RaceRacerState, now: number): boolean {
@@ -108,6 +114,7 @@ export function createRaceInstance(order: RacerIdentity[], baseSkills: Map<numbe
       // Starts already in place — no slide-in animation on a fresh race/clone, only on later
       // rank changes.
       displaySlot: RACER_COUNT - 1 - rank,
+      knockedOutThisWave: false,
     })),
     obstacle: null,
     nextObstacleAt: now + 600,
@@ -172,29 +179,38 @@ export function updateRace(race: RaceInstance, dt: number, now: number, humanJum
       obstacle.resolvedRanks[rank] = true;
       const racer = obstacle.order[rank]!;
       if (!isAirborne(racer, now)) {
-        // Failed — sent to the back of the pack. This only touches the LIVE array (which decides
-        // future rendering/next-wave ranks); the obstacle's own reach-time schedule for the
-        // remaining not-yet-resolved ranks was fixed at spawn time and is unaffected.
-        const idx = race.racers.indexOf(racer);
-        if (idx !== -1) {
-          race.racers.splice(idx, 1);
-          race.racers.push(racer);
-        }
+        // Failed — flies off-screen immediately (see the slide step below), but doesn't actually
+        // reorder the live array (and so doesn't touch anyone else's rank) until the WHOLE wave
+        // finishes, just below. Reordering incrementally, per racer, as each one resolved used to
+        // mean someone's own column could shift mid-sweep for a reason that had nothing to do
+        // with their own jump.
+        racer.knockedOutThisWave = true;
       }
     }
 
     if (now - obstacle.spawnedAt >= totalSweepMs(obstacle)) {
+      // The wave is fully done — NOW apply every failure from it as one batch: survivors keep
+      // their relative order, failures go to the back in the order they happened. Partitioning
+      // this way (rather than removing-and-re-appending each failure one at a time in a loop)
+      // matters in the degenerate case where EVERY racer fails the same wave — doing it one at a
+      // time is a no-op there (each removal-and-append just cycles the array back to where it
+      // started), silently leaving nobody's rank changed despite universal failure.
+      race.racers = [...obstacle.order.filter((r) => !r.knockedOutThisWave), ...obstacle.order.filter((r) => r.knockedOutThisWave)];
+      for (const racer of obstacle.order) racer.knockedOutThisWave = false;
       race.obstacle = null;
       race.nextObstacleAt = now + rampedValue(PHASE_BASE_SPAWN_MS[race.phase], RACE_RAMP_SPAWN_FLOOR_MS, race, now);
     }
   }
 
-  // Slide every racer's drawn position toward their current rank's column, rather than snapping
-  // instantly — runs every tick regardless of whether an obstacle is active, so a racer who just
-  // moved up (someone ahead of them failed) keeps gliding into place even between waves.
-  const maxStep = SLIDE_SPEED_SLOTS_PER_SEC * dt;
+  // Slide every racer's drawn position toward their target, rather than snapping instantly —
+  // runs every tick regardless of whether an obstacle is active, so a racer who just moved up
+  // (someone ahead of them failed, and the wave has since fully resolved) keeps gliding into
+  // place even between waves. A racer mid-wave-knockout targets a fixed off-screen slot instead
+  // of their (still pre-reorder) rank, and gets there much faster — see KNOCKOUT_*.
   race.racers.forEach((racer, rank) => {
-    const target = RACER_COUNT - 1 - rank;
+    const target = racer.knockedOutThisWave ? KNOCKOUT_OFFSCREEN_SLOT : RACER_COUNT - 1 - rank;
+    const speed = racer.knockedOutThisWave ? KNOCKOUT_FLY_SPEED_SLOTS_PER_SEC : SLIDE_SPEED_SLOTS_PER_SEC;
+    const maxStep = speed * dt;
     const diff = target - racer.displaySlot;
     if (Math.abs(diff) <= maxStep) racer.displaySlot = target;
     else racer.displaySlot += Math.sign(diff) * maxStep;
