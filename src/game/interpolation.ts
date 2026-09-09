@@ -56,11 +56,19 @@ const MAX_ESTIMATED_SPEED = MOVE_SPEED * 1.1;
  * measured window still shows the past, arriving late and unevenly; extrapolating from the latest
  * point tracks the present far more closely and doesn't compound timing jitter into visible
  * stutter. Any misprediction (e.g. the player just changed direction) gets caught and blended in
- * smoothly over CORRECTION_MS rather than snapped, so it still never looks like a teleport. */
+ * smoothly over CORRECTION_MS rather than snapped, so it still never looks like a teleport.
+ *
+ * Every `now` here is a purely local, self-relative measurement ("how long ago did I get this
+ * sample") — it's never compared against a host-stamped absolute timestamp, so it must be a local
+ * monotonic clock (main.ts's rAF `time`, or performance.now()), NOT onlineNow(). onlineNow()
+ * includes clockOffset, which is re-estimated from live network samples on its own schedule, so
+ * using it here meant this class's own elapsed-time math jumped every time that estimate moved —
+ * network jitter leaking directly into the thing meant to smooth over network jitter. */
 export class RemoteInterpolator {
   private states = new Map<number, InterpState>();
 
-  /** Call once per remote player on each incoming position update. */
+  /** Call once per remote player on each incoming position update. `now`: local monotonic clock —
+   * see the class comment. */
   onSnapshot(playerId: number, x: number, y: number, now: number): void {
     const prev = this.states.get(playerId);
     const predicted = this.currentPosition(playerId, now) ?? { x, y };
@@ -89,7 +97,8 @@ export class RemoteInterpolator {
     }
   }
 
-  /** Call every render frame to get the smoothed position for a player id. */
+  /** Call every render frame to get the smoothed position for a player id. `now`: local monotonic
+   * clock, the same domain onSnapshot() was called with — see the class comment. */
   currentPosition(playerId: number, now: number): { x: number; y: number } | undefined {
     const s = this.states.get(playerId);
     if (!s) return undefined;

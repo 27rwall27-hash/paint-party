@@ -1,6 +1,6 @@
 import { NetworkClient } from "./NetworkClient.ts";
 import { applyFast, applySnapshot, createOnlineSession } from "./onlineSession.ts";
-import { onlineMode, onlineNow } from "./onlineMode.ts";
+import { onlineMode } from "./onlineMode.ts";
 import { HostGameLoop } from "./hostLoop.ts";
 import { PredictedPlayer } from "./predictedPlayer.ts";
 import { RemoteInterpolator } from "./interpolation.ts";
@@ -151,9 +151,13 @@ export function initOnlineUI(): void {
 
         applyFast(onlineMode.session, payload, onlineMode.mySlot);
         if (!onlineMode.interpolator) return;
-        const now = onlineNow();
+        // RemoteInterpolator's own elapsed-time math is purely self-relative ("how long ago did I
+        // get this sample") and must use a local monotonic clock, not onlineNow() — see the class
+        // comment on RemoteInterpolator for why using the host-adjusted clock there fed network
+        // jitter directly into the thing meant to smooth over it.
+        const localNow = performance.now();
         for (const p of payload.positions) {
-          if (p.id !== onlineMode.mySlot) onlineMode.interpolator.onSnapshot(p.id, p.x, p.y, now);
+          if (p.id !== onlineMode.mySlot) onlineMode.interpolator.onSnapshot(p.id, p.x, p.y, localNow);
         }
       });
       c.joinRoom(code, myName, myColor);

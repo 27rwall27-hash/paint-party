@@ -36,6 +36,12 @@ function loop(time: number): void {
     // projectile's startedAt looking like it's "in the future"), which breaks animation math and
     // can throw outright (a negative radius reaching a canvas draw call).
     const now = onlineNow();
+    // `time` (this function's own rAF timestamp, already computed above for the offline dt) is
+    // passed to PredictedPlayer/RemoteInterpolator below wherever they need a LOCAL monotonic
+    // clock instead of `now` — `now` jumps every time clockOffset gets re-estimated from a fresh
+    // network sample (up to 30x/second), which fed network jitter directly into supposedly
+    // network-immune local prediction/smoothing. `now` is still correct (and required) for
+    // anything compared against a host-stamped absolute timestamp, like canPredictMovement below.
 
     if (onlineMode.role === "guest") {
       const localInput = input.getInput(PLAYER_DEFS[0]!.keys);
@@ -54,13 +60,14 @@ function loop(time: number): void {
           onlineMode.lastAuthoritativePlayer,
           canPredictMovement ? localInput : NEUTRAL_INPUT,
           now,
+          time,
         );
         onlineMode.session.players[mySlot] = predicted;
       }
       if (onlineMode.interpolator) {
         for (const p of onlineMode.session.players) {
           if (p.id === mySlot) continue;
-          const pos = onlineMode.interpolator.currentPosition(p.id, now);
+          const pos = onlineMode.interpolator.currentPosition(p.id, time);
           if (pos) {
             p.x = pos.x;
             p.y = pos.y;

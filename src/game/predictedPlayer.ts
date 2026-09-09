@@ -28,7 +28,10 @@ const CORRECTION_MS = 150;
  * confusion) is host-decided and always taken verbatim from the latest snapshot. */
 export class PredictedPlayer {
   private predicted: Player | undefined;
-  private lastUpdateAt: number | undefined;
+  /** In the *local* monotonic clock (performance.now()-based via main.ts's rAF timestamp), never
+   * the host-adjusted onlineNow() — see the comment on `localNow` in update() for why the two
+   * can't be the same value here. */
+  private lastLocalNow: number | undefined;
   /** Remaining correction to bleed off each frame, decaying toward zero over CORRECTION_MS
    * instead of applying it all at once — see the comment on CORRECTION_MS for why. */
   private errorX = 0;
@@ -38,12 +41,26 @@ export class PredictedPlayer {
    * wasPaintHeld tracking — see the comment where this is used in update(). */
   private wasPaintHeld = false;
 
-  /** Call every render frame with the guest's own live input. Returns the predicted player to
-   * render in place of the authoritative one. */
-  update(authoritative: Player, input: PlayerInputState, now: number): Player {
-    if (!this.predicted || this.lastUpdateAt === undefined) {
+  /** Call every render frame with the guest's own live input. `now` is the host-adjusted clock
+   * (onlineNow()) — updatePlayer() needs it in the same domain as the host-stamped absolute
+   * fields it compares against (confusedUntil, machineGunUntil, shrinkUntil), which are copied
+   * from `authoritative` below. `localNow` is a separate, purely local monotonic timestamp (pass
+   * the rAF callback's own `time` argument, or performance.now()) used ONLY to measure this
+   * frame's dt.
+   *
+   * These must NOT be the same value: onlineNow() = Date.now() + clockOffset, and clockOffset is
+   * re-estimated from live network samples up to 30x/second, on its own schedule, completely
+   * decoupled from the render loop's actual frame cadence. Every time that estimate shifts, the
+   * very next onlineNow() reading jumps by however much it moved — nothing to do with how much
+   * real time actually passed since the last frame. Using that jumpy value to compute dt fed a
+   * burst of spurious extra (or negative, clamped away) distance into the *locally predicted*
+   * player on every single offset update, which is exactly backwards: local prediction exists so
+   * a guest's own movement is immune to network jitter, and this made it track that jitter
+   * directly instead. Returns the predicted player to render in place of the authoritative one. */
+  update(authoritative: Player, input: PlayerInputState, now: number, localNow: number): Player {
+    if (!this.predicted || this.lastLocalNow === undefined) {
       this.predicted = { ...authoritative };
-      this.lastUpdateAt = now;
+      this.lastLocalNow = localNow;
     }
     const p = this.predicted;
     // Non-predicted fields always come straight from the host. name/color in particular were
@@ -61,8 +78,8 @@ export class PredictedPlayer {
     p.confusedAngleSetAt = authoritative.confusedAngleSetAt;
     p.bigShotPending = authoritative.bigShotPending;
 
-    const dt = Math.min(0.05, (now - this.lastUpdateAt) / 1000);
-    this.lastUpdateAt = now;
+    const dt = Math.min(0.05, (localNow - this.lastLocalNow) / 1000);
+    this.lastLocalNow = localNow;
     updatePlayer(p, input, dt, now);
 
     // GameSession.updatePlaying() resets cursorRadius to MIN_RADIUS the instant paint is
@@ -130,7 +147,7 @@ export class PredictedPlayer {
 
   reset(): void {
     this.predicted = undefined;
-    this.lastUpdateAt = undefined;
+    this.lastLocalNow = undefined;
     this.errorX = 0;
     this.errorY = 0;
     this.errorRadius = 0;
