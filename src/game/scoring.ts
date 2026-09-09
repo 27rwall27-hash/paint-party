@@ -55,6 +55,13 @@ export function computeRoundResults(
   players: Player[],
   pointsByRank: number[] = DEFAULT_POINTS_BY_RANK,
 ): OutlineResult[] {
+  // No one to score against — scoreOutline's palette would be empty, leaving every painted pixel
+  // matched to a bogus playerId -1 instead of just having no ranking at all. Shouldn't be reachable
+  // today (a match always starts with at least the host active, and a mid-match departure freezes
+  // a player rather than removing them — see Player.active), but cheap to guard regardless.
+  if (players.length === 0) {
+    return outlines.map((outline, outlineIndex) => ({ outlineIndex, kind: outline.kind, ranking: [] }));
+  }
   return outlines.map((outline, outlineIndex) => {
     const coverage = scoreOutline(outline, players);
     // Only players who actually painted something compete for rank/points — an

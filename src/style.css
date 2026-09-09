@@ -121,8 +121,35 @@ body {
   image-rendering: crisp-edges;
 }
 
+#modeToggle {
+  display: flex;
+  width: 100%;
+  background: #17131c;
+  border: 1px solid #453e4e;
+  border-radius: 10px;
+  padding: 4px;
+  gap: 4px;
+}
+
+.modeBtn {
+  flex: 1 1 0;
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 0;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: #cabfd1;
+  cursor: pointer;
+}
+
+.modeBtn.selected {
+  background: #ffd60a;
+  color: #241f29;
+}
+
 #online,
-#playerSetup {
+#localPanel {
   width: 100%;
   background: #241f29;
   color: #eee;
@@ -131,8 +158,7 @@ body {
   font-size: 14px;
 }
 
-#online summary,
-#playerSetup summary {
+#online summary {
   cursor: pointer;
   font-weight: 700;
   color: #ffd60a;
@@ -145,13 +171,51 @@ body {
 }
 
 #online input,
-#playerSetup input {
+#localPanel input {
   font: inherit;
   padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid #453e4e;
   background: #17131c;
   color: #fff;
+}
+
+.colorPicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 12px;
+}
+
+.colorSwatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.colorSwatch.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #241f29, 0 0 0 4px #ffd60a;
+}
+
+#onlineRoomControls {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #453e4e;
+}
+
+#onlineRename {
+  margin-top: 8px;
+}
+
+#renameStatus {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ff8a8a;
+  margin: 4px 0 0;
 }
 
 .settingsRow {
@@ -175,7 +239,8 @@ body {
 
 #onlineCreateBtn,
 #onlineJoinBtn,
-#onlineStartBtn {
+#onlineStartBtn,
+#renameApplyBtn {
   font: inherit;
   font-weight: 700;
   padding: 6px 16px;
@@ -183,6 +248,17 @@ body {
   border: none;
   background: #ffd60a;
   color: #241f29;
+  cursor: pointer;
+}
+
+#onlineLeaveBtn {
+  font: inherit;
+  font-weight: 700;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid #6b3a45;
+  background: transparent;
+  color: #ff8a8a;
   cursor: pointer;
 }
 

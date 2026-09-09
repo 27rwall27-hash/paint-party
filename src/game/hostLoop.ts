@@ -72,6 +72,9 @@ export class HostGameLoop {
     this.client = client;
     this.inputSource = new HostInputSource(new InputManager());
     this.session = new GameSession(sound, (e) => this.pendingPaint.push(e));
+    // Only the host (slot 0) is active the instant the room is created — the rest activate as
+    // guests join, via renderRoster()'s presence-driven sync (onlineUI.ts) while state === "MENU".
+    this.session.players.forEach((p, i) => (p.active = i === 0));
     client.onGuestInput((slot, state) => this.inputSource.setGuestInput(slot, state));
     this.timer = setInterval(() => this.tick(), TICK_MS);
   }

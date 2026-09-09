@@ -49,6 +49,32 @@ export const ALL_BOUND_KEYS = new Set(
   PLAYER_DEFS.flatMap((p) => [p.keys.up, p.keys.down, p.keys.left, p.keys.right, p.keys.paint]),
 );
 
+// A fixed, curated palette instead of a free color picker — keeps every player's color visually
+// distinct from every other preset (no near-duplicates a "no duplicate colors" rule would need to
+// fuzzy-match), and gives colorPicker.ts a small, known set of swatches to render as buttons.
+export const PRESET_COLORS: string[] = [
+  "#e63946", // red
+  "#f3722c", // orange
+  "#f9c74f", // yellow
+  "#ffd60a", // gold
+  "#90be6d", // light green
+  "#2ecc71", // green
+  "#43aa8b", // teal
+  "#277da1", // steel blue
+  "#3a86ff", // bright blue
+  "#4361ee", // indigo blue
+  "#5e60ce", // indigo
+  "#9d4edd", // purple
+  "#c77dff", // lavender
+  "#f72585", // magenta
+  "#ff477e", // pink
+  "#ff7096", // rose
+  "#ff9f1c", // amber
+  "#8d5524", // brown
+  "#adb5bd", // silver
+  "#2b2d42", // near-black navy
+];
+
 export const MIN_RADIUS = 8;
 export const DEFAULT_MAX_RADIUS = 42.78; // 46 * 0.93 (7% smaller)
 export const GROW_RATE = 60; // px/sec while paint held (charging)

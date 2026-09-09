@@ -6,10 +6,12 @@ import * as sound from "./game/sound.ts";
 import { initOnlineUI } from "./game/onlineUI.ts";
 import { onlineMode, onlineNow } from "./game/onlineMode.ts";
 import { initPlayerSetupUI } from "./game/playerSetupUI.ts";
+import { initModeToggleUI } from "./game/modeToggleUI.ts";
 import { MOVE_LOCK_MS, PLAYER_DEFS } from "./game/constants.ts";
 import type { PlayerInputState } from "./game/Input.ts";
 
 sound.init();
+initModeToggleUI();
 initOnlineUI();
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
@@ -18,6 +20,9 @@ const NEUTRAL_INPUT: PlayerInputState = { up: false, down: false, left: false, r
 
 const input = new InputManager();
 const session = new GameSession(sound);
+// Local play is solo-only now — session.players stays a fixed 4-slot array (see Player.active),
+// but only slot 0 is ever active locally; the other 3 sit unrendered/unscored.
+session.players.forEach((p, i) => (p.active = i === 0));
 initPlayerSetupUI(session);
 
 let lastTime = performance.now();

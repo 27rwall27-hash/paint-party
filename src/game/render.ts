@@ -25,7 +25,7 @@ import {
 } from "./constants.ts";
 import type { GameSession } from "./GameSession.ts";
 import type { Powerup } from "./Outline.ts";
-import { currentMaxRadius, isMachineGunActive } from "./Player.ts";
+import { activePlayers, currentMaxRadius, isMachineGunActive } from "./Player.ts";
 import { onlineMode } from "./onlineMode.ts";
 import { ROUNDS } from "./rounds.ts";
 
@@ -74,7 +74,7 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   if (session.state === "MENU") {
-    drawMenu(ctx);
+    drawMenu(ctx, session);
     drawFrame(ctx);
     drawConnectionBanner(ctx, now);
     updateDomHud(session, now);
@@ -177,35 +177,30 @@ function drawFrame(ctx: CanvasRenderingContext2D): void {
   ctx.restore();
 }
 
-function drawMenu(ctx: CanvasRenderingContext2D): void {
+function drawMenu(ctx: CanvasRenderingContext2D, session: GameSession): void {
   ctx.fillStyle = INK;
   ctx.textAlign = "center";
   ctx.font = "bold 64px 'Segoe UI', sans-serif";
   ctx.fillText("PAINT PARTY", CANVAS_W / 2, 180);
   ctx.font = "24px 'Segoe UI', sans-serif";
-  ctx.fillText("Hold your paint key to charge, release to fling a paint blob.", CANVAS_W / 2, 230);
+  ctx.fillText("WASD to move, Space to hold-charge and release to fling a paint blob.", CANVAS_W / 2, 230);
   ctx.fillText("Grab power-up circles before their timer runs out for a bonus.", CANVAS_W / 2, 262);
 
-  const cols = [
-    { name: "P1", color: "#e63946", move: "W A S D", paint: "Space" },
-    { name: "P2", color: "#3a86ff", move: "Arrow Keys", paint: "/" },
-    { name: "P3", color: "#ffd60a", move: "I J K L", paint: "O" },
-    { name: "P4", color: "#2ecc71", move: "T F G H", paint: "R" },
-  ];
-  const startX = CANVAS_W / 2 - ((cols.length - 1) * 220) / 2;
-  cols.forEach((c, i) => {
+  // Real players, not a hardcoded P1-P4 legend — this screen is also what's visible behind the
+  // online lobby panel while players are joining/picking names & colors (session.state starts at
+  // "MENU" until Start Match), so it needs to reflect whoever's actually in the room right now.
+  const players = activePlayers(session.players);
+  const startX = CANVAS_W / 2 - ((players.length - 1) * 220) / 2;
+  players.forEach((p, i) => {
     const x = startX + i * 220;
     const y = 380;
-    ctx.fillStyle = c.color;
+    ctx.fillStyle = p.color;
     ctx.beginPath();
     ctx.arc(x, y, 26, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = INK;
     ctx.font = "bold 20px 'Segoe UI', sans-serif";
-    ctx.fillText(c.name, x, y + 55);
-    ctx.font = "16px 'Segoe UI', sans-serif";
-    ctx.fillText(`Move: ${c.move}`, x, y + 80);
-    ctx.fillText(`Paint: ${c.paint}`, x, y + 102);
+    ctx.fillText(p.name, x, y + 55);
   });
 
   ctx.font = "bold 26px 'Segoe UI', sans-serif";
@@ -460,9 +455,10 @@ function drawImpacts(ctx: CanvasRenderingContext2D, session: GameSession, now: n
 }
 
 function drawPaintGuns(ctx: CanvasRenderingContext2D, session: GameSession): void {
-  const count = session.players.length;
-  for (const player of session.players) {
-    const baseX = gunStationX(player.id, count);
+  const active = activePlayers(session.players);
+  const count = active.length;
+  for (const player of active) {
+    const baseX = gunStationX(active.indexOf(player), count);
     const angle = Math.atan2(player.y - GUN_BASE_Y, player.x - baseX);
 
     ctx.save();
@@ -496,7 +492,7 @@ function drawPaintGuns(ctx: CanvasRenderingContext2D, session: GameSession): voi
 }
 
 function drawCursors(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
-  for (const player of session.players) {
+  for (const player of activePlayers(session.players)) {
     const maxR = currentMaxRadius(player, now);
 
     ctx.save();
@@ -580,7 +576,7 @@ export function updateDomHud(session: GameSession, now: number): void {
   } else {
     // Sorted by score so it reads as an actual leaderboard, with whoever's currently in the lead
     // (ties included) visually called out — otherwise it's hard to tell who's winning at a glance.
-    const sorted = [...session.players].sort((a, b) => b.score - a.score);
+    const sorted = activePlayers(session.players).sort((a, b) => b.score - a.score);
     const topScore = sorted[0]?.score ?? 0;
     hudScoresEl.innerHTML = sorted
       .map((p) => {
@@ -864,7 +860,7 @@ function drawResultsLeaderboard(ctx: CanvasRenderingContext2D, session: GameSess
     alpha = Math.max(0, (RESULTS_LEADERBOARD_MS - elapsed) / LEADERBOARD_FADE_MS);
   }
 
-  const sorted = [...session.players].sort((a, b) => b.score - a.score);
+  const sorted = activePlayers(session.players).sort((a, b) => b.score - a.score);
   const topScore = sorted[0]?.score ?? 0;
 
   ctx.save();
@@ -909,8 +905,9 @@ function drawVictory(ctx: CanvasRenderingContext2D, session: GameSession, now: n
 
   drawConfetti(ctx, revealElapsed);
 
-  const topScore = Math.max(0, ...session.players.map((p) => p.score));
-  const winners = session.players.filter((p) => p.score === topScore);
+  const active = activePlayers(session.players);
+  const topScore = Math.max(0, ...active.map((p) => p.score));
+  const winners = active.filter((p) => p.score === topScore);
   const winnerColor = winners[0]?.color ?? "#fff";
   const text =
     winners.length > 1 ? `${winners.map((p) => p.name).join(" & ")} Win!` : `${winners[0]?.name ?? "?"} Wins!`;
@@ -959,7 +956,7 @@ function drawGameOver(ctx: CanvasRenderingContext2D, session: GameSession): void
   ctx.font = "bold 48px 'Segoe UI', sans-serif";
   ctx.fillText("Final Scores", CANVAS_W / 2, 140);
 
-  const ranked = [...session.players].sort((a, b) => b.score - a.score);
+  const ranked = activePlayers(session.players).sort((a, b) => b.score - a.score);
   ranked.forEach((p, i) => {
     ctx.fillStyle = p.color;
     ctx.font = "bold 30px 'Segoe UI', sans-serif";

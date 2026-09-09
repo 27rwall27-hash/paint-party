@@ -32,6 +32,13 @@ export interface Player {
   confusedUntil: number;
   confusedAngle: number;
   confusedAngleSetAt: number;
+  /** Whether this slot is actually occupied by a real player right now. `session.players` is
+   * always a fixed 4-slot array (both local and online) so slot numbers never move around — see
+   * the comment on this in the plan/commit history — everything that renders or scores players
+   * filters to `activePlayers()` first instead of iterating the raw array. Only ever mutated by
+   * the host while the session is in "MENU"; locked for the rest of a match once it starts, so a
+   * mid-match disconnect freezes a player in place rather than removing them. */
+  active: boolean;
 }
 
 const START_POSITIONS: Array<[number, number]> = [
@@ -60,8 +67,16 @@ export function createPlayers(): Player[] {
       confusedUntil: 0,
       confusedAngle: 0,
       confusedAngleSetAt: 0,
+      active: true,
     };
   });
+}
+
+/** The subset of `players` actually occupied right now — everything that renders or scores
+ * players should iterate this, not the raw fixed-length array. See the comment on `Player.active`
+ * for why the array itself never shrinks/reorders. */
+export function activePlayers(players: Player[]): Player[] {
+  return players.filter((p) => p.active);
 }
 
 export function resetForRound(players: Player[]): void {

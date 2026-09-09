@@ -8,7 +8,13 @@
 
 import * as sound from "./sound.ts";
 import { onlineNow } from "./onlineMode.ts";
-import { LAST_CHANCE_MS, TICK_WINDOW_MS, VICTORY_CURTAIN_HOLD_MS, VICTORY_CURTAIN_OPEN_MS } from "./constants.ts";
+import {
+  LAST_CHANCE_MS,
+  ROUND_NUMBER_MS,
+  TICK_WINDOW_MS,
+  VICTORY_CURTAIN_HOLD_MS,
+  VICTORY_CURTAIN_OPEN_MS,
+} from "./constants.ts";
 import { ROUNDS } from "./rounds.ts";
 import type { SnapshotPayload } from "./netProtocol.ts";
 import type { GameState } from "./GameSession.ts";
@@ -19,6 +25,7 @@ interface GuestSoundState {
   revealedCount: number;
   lastTickSecond: number;
   victoryRevealed: boolean;
+  curtainSoundPlayed: boolean;
   powerupKeys: Set<number>;
   claimedKeys: Set<number>;
 }
@@ -47,7 +54,21 @@ export function syncGuestSound(payload: SnapshotPayload): void {
   if (!isFirstSnapshot && roundChanged && payload.state === "ROUND_INTRO") {
     sound.setUrgent(false);
     sound.setRoundSpeed(payload.roundIndex, isFinale);
-    sound.playCurtain();
+  }
+
+  // The curtain-open cue mirrors the host's own timing (GameSession only plays it once
+  // introElapsed >= ROUND_NUMBER_MS within ROUND_INTRO, when the curtain visually starts opening —
+  // not the instant the round number first appears). Firing it immediately on the round-changed
+  // snapshot, as this used to, played it audibly early: a guest's first ROUND_INTRO snapshot can
+  // easily arrive well before that much time has actually elapsed. Elapsed-time-gated the same way
+  // victoryRevealed below is, checked every snapshot instead of only on the state transition.
+  let curtainSoundPlayed = prev?.state === "ROUND_INTRO" && !roundChanged ? prev.curtainSoundPlayed : false;
+  if (payload.state === "ROUND_INTRO" && !curtainSoundPlayed) {
+    const introElapsed = onlineNow() - payload.stateEnteredAt;
+    if (introElapsed >= ROUND_NUMBER_MS) {
+      curtainSoundPlayed = true;
+      if (!isFirstSnapshot) sound.playCurtain();
+    }
   }
 
   if (!isFirstSnapshot && stateChanged) {
@@ -124,6 +145,7 @@ export function syncGuestSound(payload: SnapshotPayload): void {
     revealedCount: payload.revealedCount,
     lastTickSecond,
     victoryRevealed,
+    curtainSoundPlayed,
     powerupKeys,
     claimedKeys,
   };

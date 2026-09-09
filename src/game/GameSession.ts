@@ -53,7 +53,7 @@ import {
 import type { PlayerInputState } from "./Input.ts";
 import { Outline, Powerup } from "./Outline.ts";
 import { spawnOnePowerup } from "./Powerup.ts";
-import { createPlayers, currentMaxRadius, isMachineGunActive, resetForRound, updatePlayer, type Player } from "./Player.ts";
+import { activePlayers, createPlayers, currentMaxRadius, isMachineGunActive, resetForRound, updatePlayer, type Player } from "./Player.ts";
 import { computeRoundResults, type OutlineResult } from "./scoring.ts";
 import { ROUNDS } from "./rounds.ts";
 
@@ -397,6 +397,7 @@ export class GameSession {
       }
     }
     for (const player of this.players) {
+      if (!player.active) continue;
       const keys = PLAYER_KEYS[player.id]!;
       const playerInput = input.getInput(keys);
       const mgActive = isMachineGunActive(player, now);
@@ -471,8 +472,12 @@ export class GameSession {
 
   private fireProjectile(player: Player, x: number, y: number, radius: number, now: number): void {
     // Launch from the muzzle tip of that player's paint gun, which is always aimed at their
-    // cursor — i.e. aimed at (x, y), the same point the shot will land on.
-    const baseX = gunStationX(player.id, this.players.length);
+    // cursor — i.e. aimed at (x, y), the same point the shot will land on. Positioned by DISPLAY
+    // index among active players, not raw slot id/players.length — session.players is a fixed
+    // 4-slot array (see Player.active), so a sparse active set (e.g. slots 0 and 2) would leave a
+    // visible gap in the gun-station layout if positioned by raw slot number instead.
+    const active = activePlayers(this.players);
+    const baseX = gunStationX(active.indexOf(player), active.length);
     const angle = Math.atan2(y - GUN_BASE_Y, x - baseX);
     const muzzleX = baseX + Math.cos(angle) * GUN_LENGTH;
     const muzzleY = GUN_BASE_Y + Math.sin(angle) * GUN_LENGTH;
@@ -678,7 +683,7 @@ export class GameSession {
     // anything yet (that only happens in updateProjectiles/landProjectile, which won't run again
     // once we leave PLAYING), so just dropping it here is enough; nothing to undo.
     this.projectiles = [];
-    this.lastResults = computeRoundResults(this.outlines, this.players, this.round?.pointsByRank);
+    this.lastResults = computeRoundResults(this.outlines, activePlayers(this.players), this.round?.pointsByRank);
     const n = this.lastResults.length;
     const manyOutlines = n > RESULTS_MANY_OUTLINES_THRESHOLD;
     this.resultsPerOutlineMs = manyOutlines

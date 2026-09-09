@@ -52,10 +52,29 @@ export interface SlotAssignPayload {
   slot: number;
 }
 
-/** Host -> one guest (filtered by clientId): e.g. room already has 4 players. */
+/** Host -> one guest (filtered by clientId): e.g. room already has 4 players, name/color taken,
+ * or a rename request was rejected for the same reason. */
 export interface RoomErrorPayload {
   clientId: string;
   message: string;
+}
+
+/** Guest -> host: "I'd like my name/color to be this" (sent on initial join request, or later as
+ * a live rename request). Host -> one guest (filtered by clientId, same shape): "approved — go
+ * ahead and track() this yourself" (presence is per-client, so the host can't set it on the
+ * guest's behalf). A rejection uses the existing RoomErrorPayload/"error" event instead of this. */
+export interface RenamePayload {
+  clientId: string;
+  name: string;
+  color: string;
+}
+
+/** Host -> all (unfiltered): the room is ending because the host left. Guests use this (and the
+ * presence-leave fallback for an unclean host departure — see NetworkClient's onPresenceLeave) to
+ * tear down cleanly instead of trying to reconnect into a room that no longer has anyone driving
+ * the simulation. */
+export interface RoomClosedPayload {
+  reason: string;
 }
 
 /** Guest -> host: this guest's latest input state for its assigned slot. */
