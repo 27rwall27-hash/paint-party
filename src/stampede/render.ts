@@ -47,27 +47,57 @@ function bandRect(index: number, bandCount: number): { y: number; h: number } {
   return { y, h };
 }
 
-function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number, now: number): void {
+/** A warm sunset scene (gradient sky, a low sun, a distant ship silhouette, and a soft dune-toned
+ * ground) — a fixed backdrop rather than something that scrolls, since the obstacle's own motion
+ * already carries the sense of movement. Drawn fresh per band so 2-3 stacked bands each get their
+ * own full scene rather than sharing one cropped image. `now` still drives a slow horizontal drift
+ * on the ship for a touch of life. */
+function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number, now: number, horizonY: number): void {
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, y, CANVAS_W, h);
   ctx.clip();
-  ctx.fillStyle = "#241f29";
-  ctx.fillRect(0, y, CANVAS_W, h);
 
-  // Simple scrolling stripes — horizontal motion, matching the obstacles' own left-to-right-facing
-  // travel (same convention as the original endless-runner: the world scrolls past stationary
-  // runners) — for a sense of forward motion.
-  const stripeW = 46;
-  const scrollSpeedPxPerSec = 90;
-  const offset = (now / 1000) * scrollSpeedPxPerSec;
-  ctx.strokeStyle = "rgba(255,255,255,0.05)";
-  ctx.lineWidth = 2;
-  for (let colX = -stripeW - (offset % stripeW); colX < CANVAS_W; colX += stripeW) {
+  const sky = ctx.createLinearGradient(0, y, 0, horizonY);
+  sky.addColorStop(0, "#b8380f");
+  sky.addColorStop(0.55, "#dd7233");
+  sky.addColorStop(1, "#f6c98a");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, y, CANVAS_W, Math.max(0, horizonY - y));
+
+  // Sun, resting on the horizon.
+  const sunR = h * 0.24;
+  const sunX = CANVAS_W * 0.24;
+  ctx.beginPath();
+  ctx.arc(sunX, horizonY, sunR, 0, Math.PI * 2);
+  ctx.fillStyle = "#fbecc2";
+  ctx.fill();
+
+  // A slow-drifting ship silhouette out on the water.
+  const shipDriftPx = 18;
+  const shipX = CANVAS_W * 0.82 + Math.sin(now / 9000) * shipDriftPx;
+  const shipScale = Math.max(0.5, Math.min(1, h / 220));
+  ctx.fillStyle = "#5b2317";
+  ctx.beginPath();
+  ctx.moveTo(shipX - 70 * shipScale, horizonY);
+  ctx.lineTo(shipX + 70 * shipScale, horizonY);
+  ctx.lineTo(shipX + 58 * shipScale, horizonY - 9 * shipScale);
+  ctx.lineTo(shipX - 58 * shipScale, horizonY - 9 * shipScale);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(shipX - 14 * shipScale, horizonY - 26 * shipScale, 30 * shipScale, 17 * shipScale);
+  ctx.fillRect(shipX - 4 * shipScale, horizonY - 36 * shipScale, 6 * shipScale, 10 * shipScale);
+
+  // Ground below the horizon, with a couple of soft dune/wave arcs for texture.
+  ctx.fillStyle = "#f0c48a";
+  ctx.fillRect(0, horizonY, CANVAS_W, Math.max(0, y + h - horizonY));
+  ctx.fillStyle = "rgba(214, 149, 92, 0.45)";
+  const duneH = Math.max(10, h * 0.05);
+  for (let i = -1; i < 5; i++) {
+    const cx = i * 320 + 140;
     ctx.beginPath();
-    ctx.moveTo(colX, y);
-    ctx.lineTo(colX, y + h);
-    ctx.stroke();
+    ctx.ellipse(cx, horizonY + duneH * 0.4, 220, duneH, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   ctx.restore();
@@ -86,11 +116,12 @@ function drawSpike(ctx: CanvasRenderingContext2D, x: number, groundLineY: number
   ctx.fill();
 }
 
-/** A stick figure with a colored head — sprinting in place (legs/arms swinging on a continuous
+/** A stick figure with a colored head — sprinting hard in place (bent knees/elbows on a continuous
  * cycle, desynced per racer via `phaseSeed` so the pack doesn't move in creepy unison) while
- * grounded, or thrown into an exaggerated "silly leap" pose (legs kicked out, arms flung up) while
- * airborne, the pose easing in/out with the jump's own arc so it's most exaggerated at the peak.
- * `footX/footY` is the ground contact point everything else is built upward from. */
+ * grounded, or thrown into a dramatic ballet grand-jeté leap (legs fully split fore/aft, one arm
+ * reaching forward and the other back) while airborne, the pose easing in/out with the jump's own
+ * arc so it's most extended right at the peak. `footX/footY` is the ground contact point
+ * everything else is built upward from. */
 function drawStickFigure(
   ctx: CanvasRenderingContext2D,
   footX: number,
@@ -121,39 +152,66 @@ function drawStickFigure(
   ctx.stroke();
 
   if (jumping) {
-    // Exaggerated leap: legs kicked one forward one back, arms thrown straight up — pose eases in
-    // and out with jumpT (0 at takeoff/landing, 1 at the peak) so it doesn't just pop into place.
-    const kick = headRadius * (0.9 + 0.9 * jumpT);
-    const armRaise = headRadius * (0.6 + 1.1 * jumpT);
+    // Grand-jeté split: front leg reaches forward, back leg trails backward, both nearly
+    // straight; one arm reaches forward (same side as the front leg), the other back (same side
+    // as the back leg) — a dramatic "X" silhouette at the peak, easing in/out with jumpT (0 at
+    // takeoff/landing, 1 at the peak) so it doesn't just pop into place.
+    const split = headRadius * (1.5 + 1.3 * jumpT);
+    const frontFootX = footX + split;
+    const frontFootY = footY - headRadius * 0.35 * jumpT;
+    const backFootX = footX - split;
+    const backFootY = footY + headRadius * 0.25;
     ctx.beginPath();
     ctx.moveTo(footX, hipY);
-    ctx.lineTo(footX - kick, footY - headRadius * 0.4);
+    ctx.lineTo(frontFootX, frontFootY);
     ctx.moveTo(footX, hipY);
-    ctx.lineTo(footX + kick * 0.75, footY + headRadius * 0.5);
+    ctx.lineTo(backFootX, backFootY);
     ctx.stroke();
+
+    const reach = armLen * (1.0 + 0.6 * jumpT);
     ctx.beginPath();
     ctx.moveTo(footX, shoulderY);
-    ctx.lineTo(footX - armLen * 0.6, shoulderY - armRaise);
+    ctx.lineTo(footX + reach, shoulderY - reach * 0.3);
     ctx.moveTo(footX, shoulderY);
-    ctx.lineTo(footX + armLen * 0.6, shoulderY - armRaise);
+    ctx.lineTo(footX - reach, shoulderY - reach * 0.15);
     ctx.stroke();
   } else {
-    // Continuous sprint cycle — legs/arms swing oppositely, like an actual running gait.
-    const phase = (now / 1000) * 11 + phaseSeed;
-    const legSwing = Math.sin(phase) * headRadius * 1.15;
-    const armSwing = Math.sin(phase + Math.PI) * headRadius * 0.9;
-    ctx.beginPath();
-    ctx.moveTo(footX, hipY);
-    ctx.lineTo(footX + legSwing, footY);
-    ctx.moveTo(footX, hipY);
-    ctx.lineTo(footX - legSwing, footY);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(footX, shoulderY);
-    ctx.lineTo(footX + armSwing, shoulderY + headRadius * 1.1);
-    ctx.moveTo(footX, shoulderY);
-    ctx.lineTo(footX - armSwing, shoulderY + headRadius * 1.1);
-    ctx.stroke();
+    // Sprinting hard: two-segment (knee-bent) legs on a real stride cycle — each leg's foot
+    // lifts and the knee drives forward-up during recovery, then extends down for the next
+    // plant — and two-segment arms pumping vigorously up/down opposite the legs, "springing"
+    // rather than swinging like a flat pendulum.
+    const phase = (now / 1000) * 12 + phaseSeed;
+    const strideLen = headRadius * 1.5;
+    const liftHeight = headRadius * 1.35;
+
+    for (const legPhase of [phase, phase + Math.PI]) {
+      const swing = Math.sin(legPhase); // -1 (trailing back) .. 1 (reaching forward)
+      const lift = Math.max(0, Math.cos(legPhase)); // 0..1, peaks mid-recovery (knee driving up)
+      const legFootX = footX + swing * strideLen;
+      const legFootY = footY - lift * liftHeight;
+      const kneeX = footX + swing * strideLen * 0.4 + lift * headRadius * 0.5;
+      const kneeY = hipY + legLen * 0.48 - lift * headRadius * 0.85;
+      ctx.beginPath();
+      ctx.moveTo(footX, hipY);
+      ctx.lineTo(kneeX, kneeY);
+      ctx.lineTo(legFootX, legFootY);
+      ctx.stroke();
+    }
+
+    for (const armPhase of [phase + Math.PI, phase]) {
+      // Opposite the same-index leg above, like a real running gait.
+      const swing = Math.sin(armPhase);
+      const pump = Math.max(0, Math.cos(armPhase));
+      const handX = footX + swing * armLen * 0.5;
+      const handY = shoulderY + armLen * 0.55 - pump * armLen * 1.05;
+      const elbowX = footX + swing * armLen * 0.28;
+      const elbowY = shoulderY + armLen * 0.32 - pump * armLen * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(footX, shoulderY);
+      ctx.lineTo(elbowX, elbowY);
+      ctx.lineTo(handX, handY);
+      ctx.stroke();
+    }
   }
 
   if (isHuman) {
@@ -174,8 +232,6 @@ function drawStickFigure(
 }
 
 function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number): void {
-  drawBandBackground(ctx, y, h, now);
-
   // The 8 racers cluster near the left of the band (not spread across its full width) — leaves a
   // long, clearly visible runway on the right where the obstacle is approaching from, and keeps
   // the pack itself tight.
@@ -184,7 +240,8 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   const colWidth = (packWidth - COLUMN_GAP * (RACER_COUNT - 1)) / RACER_COUNT;
   // One shared ground line for the whole band — every runner stands on it, every obstacle travels
   // along it (horizontally), and jumping is the only thing that moves a runner off of it, same
-  // convention as the original endless-runner this is modeled on.
+  // convention as the original endless-runner this is modeled on. Doubles as the background
+  // scene's horizon, so the sun/ship/dunes all line up with where characters actually stand.
   const groundY = y + h * GROUND_Y_FRACTION;
   const radius = Math.min(colWidth * 0.28, 17);
   const groundLineY = groundY + radius + 4;
@@ -192,7 +249,9 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   // (head + torso + legs) needs more total vertical room than a circle alone did.
   const headRadius = radius * 0.55;
 
-  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  drawBandBackground(ctx, y, h, now, groundLineY);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.beginPath();
   ctx.moveTo(0, groundLineY);
   ctx.lineTo(CANVAS_W, groundLineY);
@@ -200,12 +259,12 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
 
   const slotX = (slot: number) => packLeft + slot * (colWidth + COLUMN_GAP) + colWidth / 2;
 
-  // One shared obstacle for the whole race — slides from near the band's right edge to the
-  // pack's own leftmost column, reaching each racer at a different moment purely because
-  // they're standing at a different x (see RaceInstance.reachTimeForRank). Drawn once per band,
-  // not once per racer.
-  if (race.obstacle) {
-    const progress = obstacleProgress(race.obstacle, now);
+  // The race's obstacle(s) — normally one, rarely two (see MULTI_OBSTACLE_CHANCE) — each slides
+  // from near the band's right edge to the pack's own leftmost column, reaching each racer at a
+  // different moment purely because they're standing at a different x (see
+  // RaceInstance.reachTimeForRank).
+  for (const obstacle of race.obstacles) {
+    const progress = obstacleProgress(obstacle, now);
     const spawnX = CANVAS_W - 24;
     const targetX = slotX(0);
     const obstacleX = spawnX + progress * (targetX - spawnX);
@@ -260,9 +319,9 @@ function drawHud(ctx: CanvasRenderingContext2D, session: StampedeSession, now: n
   ctx.fillText(PHASE_LABEL[session.phase] ?? session.phase, 20, HUD_HEIGHT / 2);
 
   if (session.pendingSplitAt !== null) {
-    // Pulsing warning instead of the normal countdown — the actual split is being held back
-    // until SPLIT_WARNING_MS has passed AND every race is between obstacles (see
-    // StampedeSession.maybeSplit), so a plain "0s" would be misleading here.
+    // Pulsing warning instead of the normal countdown — obstacle spawning is suppressed and the
+    // split is waiting out a genuine quiet period (see StampedeSession.maybeSplit), so a plain
+    // "0s" would be misleading here.
     const pulse = 0.55 + 0.45 * Math.sin((now / 1000) * 6);
     ctx.fillStyle = `rgba(255, 138, 61, ${pulse.toFixed(2)})`;
     ctx.font = "bold 14px 'Segoe UI', system-ui, sans-serif";

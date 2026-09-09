@@ -1,4 +1,4 @@
-import { MAX_SPLIT_EXTRA_WAIT_MS, POINTS_BY_RANK, SINGLE_PHASE_MS, SPLIT_WARNING_MS, THREE_WAY_PHASE_MS, TWO_WAY_PHASE_MS } from "./constants.ts";
+import { ABSOLUTE_MAX_SPLIT_WAIT_MS, POINTS_BY_RANK, PRE_SPLIT_QUIET_MS, SINGLE_PHASE_MS, THREE_WAY_PHASE_MS, TWO_WAY_PHASE_MS } from "./constants.ts";
 import type { RacerIdentity } from "./identities.ts";
 import { createRaceInstance, rollBaseSkill, updateRace, type RaceInstance } from "./RaceInstance.ts";
 
@@ -15,11 +15,15 @@ export interface StampedeSession {
   baseSkills: Map<number, number>;
   /** Set once, when THREE_WAY ends — index matches `identities`. */
   finalScores: number[] | null;
-  /** Set the instant a phase reaches its nominal duration; the actual split only executes once
-   * BOTH at least SPLIT_WARNING_MS have passed since this was set AND every active race is
-   * between obstacles (see updateStampedeSession) — null whenever no split is pending. render.ts
-   * reads this to show a "splitting soon" warning instead of the normal countdown. */
+  /** Set the instant a phase reaches its nominal duration — from that moment every race stops
+   * spawning new obstacle waves (see updateRace's `suppressSpawns`), letting whatever's already
+   * in flight finish. Null whenever no split is pending. render.ts reads this to show a
+   * "splitting soon" warning instead of the normal countdown. */
   pendingSplitAt: number | null;
+  /** Set the first tick, after pendingSplitAt, that every race is confirmed obstacle-free — the
+   * split then waits PRE_SPLIT_QUIET_MS of genuine silence from THIS moment (not from
+   * pendingSplitAt) before actually executing. Null until that first clear moment is seen. */
+  clearSinceAt: number | null;
 }
 
 export function createStampedeSession(identities: RacerIdentity[], now: number): StampedeSession {
@@ -35,6 +39,7 @@ export function createStampedeSession(identities: RacerIdentity[], now: number):
     baseSkills,
     finalScores: null,
     pendingSplitAt: null,
+    clearSinceAt: null,
   };
 }
 
@@ -43,23 +48,33 @@ function identityOrder(session: StampedeSession, race: RaceInstance): RacerIdent
   return race.racers.map((r) => byId.get(r.identityId)!);
 }
 
-/** Once `elapsed >= phaseDurationMs`, waits for SPLIT_WARNING_MS to pass AND every race to be
- * between obstacles before calling `doSplit()` — see StampedeSession.pendingSplitAt. Waiting for
- * EVERY active race to be simultaneously obstacle-free is, for 2+ independent races, a real
- * coincidence that isn't guaranteed to turn up quickly (or, without jitter in their pacing, could
- * never turn up at all) — so past MAX_SPLIT_EXTRA_WAIT_MS of extra waiting, this forces the split
- * through regardless, capping the total wait instead of leaving it open-ended. */
+/** Once `elapsed >= phaseDurationMs`, this marks the phase as pending-split, which suppresses new
+ * obstacle spawns for every race (see updateRace's `suppressSpawns`, applied in
+ * updateStampedeSession below) — whatever's already in flight finishes naturally, and since
+ * nothing new starts, every race is GUARANTEED to go quiet within a bounded few seconds rather
+ * than needing a lucky simultaneous-clear coincidence. Once that first all-clear moment is seen,
+ * PRE_SPLIT_QUIET_MS of genuine silence plays out (a real beat with nothing left to dodge) before
+ * `doSplit()` actually runs. ABSOLUTE_MAX_SPLIT_WAIT_MS is a defensive-only ceiling on the whole
+ * thing, not expected to matter given spawning is suppressed rather than waited-out. */
 function maybeSplit(session: StampedeSession, now: number, elapsed: number, phaseDurationMs: number, doSplit: () => void): void {
   if (session.pendingSplitAt === null) {
-    if (elapsed >= phaseDurationMs) session.pendingSplitAt = now;
+    if (elapsed >= phaseDurationMs) {
+      session.pendingSplitAt = now;
+      session.clearSinceAt = null;
+    }
     return;
   }
-  const pendingElapsed = now - session.pendingSplitAt;
-  if (pendingElapsed < SPLIT_WARNING_MS) return;
-  const obstaclesClear = session.races.every((race) => race.obstacle === null);
-  const timedOut = pendingElapsed >= SPLIT_WARNING_MS + MAX_SPLIT_EXTRA_WAIT_MS;
-  if (obstaclesClear || timedOut) {
+
+  if (session.clearSinceAt === null) {
+    const obstaclesClear = session.races.every((race) => race.obstacles.length === 0);
+    if (obstaclesClear) session.clearSinceAt = now;
+  }
+
+  const quietLongEnough = session.clearSinceAt !== null && now - session.clearSinceAt >= PRE_SPLIT_QUIET_MS;
+  const timedOut = now - session.pendingSplitAt >= ABSOLUTE_MAX_SPLIT_WAIT_MS;
+  if (quietLongEnough || timedOut) {
     session.pendingSplitAt = null;
+    session.clearSinceAt = null;
     doSplit();
   }
 }
@@ -69,8 +84,9 @@ function maybeSplit(session: StampedeSession, now: number, elapsed: number, phas
 export function updateStampedeSession(session: StampedeSession, dt: number, now: number, humanJumpRequests: boolean[]): void {
   if (session.phase === "RESULTS") return;
 
+  const suppressSpawns = session.pendingSplitAt !== null;
   for (let i = 0; i < session.races.length; i++) {
-    updateRace(session.races[i]!, dt, now, humanJumpRequests[i] ?? false);
+    updateRace(session.races[i]!, dt, now, humanJumpRequests[i] ?? false, suppressSpawns);
   }
 
   const elapsed = now - session.phaseEnteredAt;

@@ -25,22 +25,23 @@ export const SINGLE_PHASE_MS = 40_000;
 export const TWO_WAY_PHASE_MS = 40_000;
 export const THREE_WAY_PHASE_MS = 27_000;
 
-// Once a phase reaches its nominal duration, the actual screen split waits for BOTH of these
-// before executing (see StampedeSession.maybeSplit): at least this long has passed (so players
-// get a beat to see it coming, not an instant cut) AND every currently active race has no
-// obstacle in flight (so nobody's jump gets interrupted mid-obstacle by the world rearranging
-// under them).
-export const SPLIT_WARNING_MS = 3000;
-// Waiting for EVERY currently active race to be simultaneously between obstacles at the same
-// instant is, for 2+ independent races, a real coincidence that can take a very long time to
-// naturally occur (measured: sometimes 100+ seconds for the TWO_WAY -> THREE_WAY split, once in
-// testing it hadn't happened after 10 simulated minutes) - not an acceptable wait for a mechanic
-// meant to be a quick ~3s pause. So this is a hard CAP on the extra wait beyond SPLIT_WARNING_MS:
-// once it's exceeded, the split proceeds regardless of obstacle state. Usually unnecessary (a
-// clear moment across 1-2 races typically does turn up within a couple of wave cycles), but
-// guarantees the total wait is always bounded (SPLIT_WARNING_MS + this, worst case) instead of
-// potentially unbounded.
-export const MAX_SPLIT_EXTRA_WAIT_MS = 2500;
+// Once a phase reaches its nominal duration, every currently active race stops spawning NEW
+// obstacle waves (updateRace's `suppressSpawns`) — whatever's already in flight is left to finish
+// naturally, but nothing new starts. This is what actually guarantees the races go quiet in a
+// bounded amount of time: earlier this waited for every race's independent obstacle cycle to
+// happen to be simultaneously clear at the same instant, which for 2+ races is a real coincidence
+// that isn't guaranteed to turn up quickly (measured up to 100+ seconds, and once in testing not
+// at all in 10 simulated minutes) - suppressing new spawns instead of hoping for a lucky alignment
+// means "quiet" is just "however long the LAST obstacle already in flight takes to finish," a
+// bounded few seconds, not a coincidence. Once every race is confirmed clear, PRE_SPLIT_QUIET_MS
+// of genuine silence (see StampedeSession.maybeSplit) plays out — nothing left to dodge, players
+// get a real beat to see the split coming — before the split actually executes.
+export const PRE_SPLIT_QUIET_MS = 5000;
+// Defensive-only hard ceiling on the total pending-split wait (from becoming eligible to the
+// split actually firing) — not expected to matter in practice now that spawning is suppressed
+// rather than waited-out, but keeps a bound in place regardless of any future change to this
+// logic.
+export const ABSOLUTE_MAX_SPLIT_WAIT_MS = 16_000;
 
 // Placement -> points, index 0 = 1st place ... index 7 = 8th place. Only ever applied at the end
 // of the three simultaneous final races (see StampedeSession) — the earlier single/two-way phases
@@ -95,6 +96,14 @@ export const RACE_RAMP_SPAWN_FLOOR_MS = 350;
 // was never coming). This jitter keeps the relative phase between races perpetually drifting
 // instead of frozen, so an overlapping "both clear" moment is guaranteed eventually.
 export const SPAWN_INTERVAL_JITTER = 0.35;
+
+// Rare difficulty spike: when a new wave spawns, there's a small chance a SECOND obstacle also
+// joins it (staggered a bit behind the first, not simultaneous — see RaceInstance), meaning
+// racers may need two well-timed jumps in quick succession instead of one. Kept deliberately
+// infrequent ("only very occasionally") rather than a core mechanic.
+export const MULTI_OBSTACLE_CHANCE = 0.16;
+export const MULTI_OBSTACLE_STAGGER_MIN_MS = 350;
+export const MULTI_OBSTACLE_STAGGER_MAX_MS = 750;
 
 // Ground level within a band — a fraction of the band's own height where every runner stands and
 // the shared obstacle travels, matching the classic endless-runner convention (the T-Rex game
