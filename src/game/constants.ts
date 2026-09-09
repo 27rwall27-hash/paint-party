@@ -77,14 +77,12 @@ export const FINAL_BURST_AT_MS = 10000;
 export const FINAL_BURST_COUNT = 4;
 
 // The finale's music gets both faster AND higher-pitched every FINALE_INTENSITY_INTERVAL_MS spent
-// actually playing that round, but not until FINALE_INTENSITY_START_DELAY_MS has passed first —
-// a rising "vinyl speeding up" panic effect exclusive to the last round that should be over before
-// players even notice it's started, not something that kicks in the moment the round begins.
-// Linear, not compounding: at level N the multiplier is (1 + N * FINALE_INTENSITY_STEP_PCT) on
-// top of the round's own normal per-round tempo bump, not repeated multiplication.
-export const FINALE_INTENSITY_START_DELAY_MS = 10000;
+// actually playing that round, starting immediately (no artificial delay — a 0.5%/sec ramp is
+// slow enough on its own that it shouldn't be noticeable for a good while). Linear, not
+// compounding: at level N the multiplier is (1 + N * FINALE_INTENSITY_STEP_PCT) on top of the
+// round's own normal per-round tempo bump, not repeated multiplication.
 export const FINALE_INTENSITY_INTERVAL_MS = 1000;
-export const FINALE_INTENSITY_STEP_PCT = 0.0025;
+export const FINALE_INTENSITY_STEP_PCT = 0.005;
 
 export const SHRINK_MULTIPLIER = 0.4;
 export const SHRINK_DURATION_MS = 6000;
@@ -95,7 +93,7 @@ export const SWEEP_BAND_HEIGHT = Math.round(CANVAS_H * 0.2);
 
 export const POWERUP_CLAIMED_FLASH_MS = 500;
 export const POWERUP_PULSE_PERIOD_MS = 900; // continuous "notice me" pulse for as long as it's on screen
-export const POWERUP_AURA_MS = 500; // one-time bright shine ring right when it spawns
+export const POWERUP_AURA_MS = 1500; // one-time bright shine ring right when it spawns (was 500)
 
 // Between-round sequence, in order: score tallying happens with the curtain still open (see
 // RESULTS_TALLY_DELAY_MS/RESULTS_PER_OUTLINE_MS below) — once that finishes the curtain closes

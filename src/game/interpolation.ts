@@ -1,3 +1,5 @@
+import { MOVE_SPEED } from "./constants.ts";
+
 interface InterpState {
   /** Last confirmed real position, and the velocity estimated from the update before it. */
   x: number;
@@ -31,6 +33,17 @@ const MAX_EXTRAPOLATE_MS = 120;
 // and instead compounds into a steady lag behind the true position for as long as a player keeps
 // moving continuously — exactly the case that's supposed to need no smoothing help at all.
 const CORRECTION_MS = 20;
+// A floor on dt when estimating velocity between two updates — real Realtime delivery can arrive
+// in tight bursts (a brief hiccup catching up all at once), and dividing a normal position delta
+// by a near-zero elapsed time inflates the estimated velocity wildly, flinging the extrapolated
+// position far off screen. Ticks are nominally ~33ms apart, so anything tighter than this is
+// almost certainly burst delivery, not a genuinely faster update rate.
+const MIN_VELOCITY_DT_MS = 30;
+// Belt-and-suspenders hard ceiling on the estimated speed itself: no player can legitimately move
+// faster than MOVE_SPEED, so any estimate above that (from a round change, a reconnect, or any
+// other source of a bad sample) is definitely bogus and gets capped rather than trusted. Only a
+// small margin over MOVE_SPEED, not a generous one — the whole point is to bound the worst case.
+const MAX_ESTIMATED_SPEED = MOVE_SPEED * 1.1;
 
 /** Smooths remote (non-locally-controlled) players' movement between position updates — a
  * lighter-weight complement to PredictedPlayer, which only applies to the guest's own player.
@@ -52,9 +65,15 @@ export class RemoteInterpolator {
     const prev = this.states.get(playerId);
     const predicted = this.currentPosition(playerId, now) ?? { x, y };
     if (prev) {
-      const dt = Math.max(0.001, (now - prev.receivedAt) / 1000);
-      const vx = (x - prev.x) / dt;
-      const vy = (y - prev.y) / dt;
+      const dt = Math.max(MIN_VELOCITY_DT_MS / 1000, (now - prev.receivedAt) / 1000);
+      let vx = (x - prev.x) / dt;
+      let vy = (y - prev.y) / dt;
+      const speed = Math.hypot(vx, vy);
+      if (speed > MAX_ESTIMATED_SPEED) {
+        const scale = MAX_ESTIMATED_SPEED / speed;
+        vx *= scale;
+        vy *= scale;
+      }
       this.states.set(playerId, {
         x,
         y,

@@ -72,15 +72,19 @@ export function startMusic(): void {
 
 /**
  * Call once per round (0-indexed) — each round is 8% faster than the last, compounding. Pitch is
- * always preserved here, finale included — the round's own baseline speed bump (up to +36% by the
- * finale) must never itself shift pitch, only the finale's separate escalating ramp below does
- * that, and only once it's actually running.
+ * preserved (tempo-only) for every normal round. The finale is the one exception: preservesPitch
+ * flips off here, once, right at the start of that round — not mid-round on the ramp's first tick
+ * — because toggling it on an already-playing track switches which resampling algorithm the
+ * browser uses and produces an audible glitch; doing it once at the round transition (a moment
+ * that's already an expected "new round" cue, curtain and tempo bump included) means the ramp
+ * itself, once running, never has to flip anything again — it's just a continuous, uneventful
+ * rate change from there.
  */
-export function setRoundSpeed(roundIndex: number): void {
+export function setRoundSpeed(roundIndex: number, isFinale: boolean): void {
   const multiplier = 1.08 ** roundIndex;
   roundSpeedMultiplier = multiplier;
   if (custom.music) {
-    custom.music.preservesPitch = true;
+    custom.music.preservesPitch = !isFinale;
     custom.music.playbackRate = multiplier;
   } else {
     audio.setTempoMultiplier(multiplier);
@@ -88,18 +92,15 @@ export function setRoundSpeed(roundIndex: number): void {
   }
 }
 
-/** Finale-only: called every FINALE_INTENSITY_INTERVAL_MS once the ramp is running (see
- * GameSession's FINALE_INTENSITY_START_DELAY_MS — it stays quiet for a while first), with an
- * incrementing level — ramps tempo AND pitch together on top of the round's own baseline speed,
- * for a "speeding up" panic effect that only becomes noticeable well into the last round. Linear,
- * not compounding — level 40 is +10% (40 * 0.25%), not 1.0025^40. preservesPitch only flips on the
- * very first call (level 1) and stays off for the rest of the round from there. */
+/** Finale-only: called every FINALE_INTENSITY_INTERVAL_MS starting from the moment the finale
+ * begins playing (no delay — 0.5%/sec is gradual enough on its own), with an incrementing level —
+ * ramps tempo AND pitch together on top of the round's own baseline speed. Linear, not compounding
+ * — level 40 is +20% (40 * 0.5%), not 1.005^40. Never touches preservesPitch — setRoundSpeed
+ * already set that once for the whole round, so this is just a plain rate update every tick. */
 export function setFinaleIntensity(level: number): void {
   const multiplier = roundSpeedMultiplier * (1 + level * FINALE_INTENSITY_STEP_PCT);
-  if (custom.music) {
-    custom.music.preservesPitch = false;
-    custom.music.playbackRate = multiplier;
-  } else {
+  if (custom.music) custom.music.playbackRate = multiplier;
+  else {
     audio.setTempoMultiplier(multiplier);
     audio.setPitchMultiplier(multiplier);
   }
