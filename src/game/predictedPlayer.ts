@@ -1,5 +1,6 @@
 import { updatePlayer, type Player } from "./Player.ts";
 import type { PlayerInputState } from "./Input.ts";
+import { MIN_RADIUS } from "./constants.ts";
 
 // Below this drift, don't bother correcting at all — the snapshot reconcile() reads from is
 // already stale relative to what's been predicted locally since it was sent, so some baseline
@@ -33,6 +34,9 @@ export class PredictedPlayer {
   private errorX = 0;
   private errorY = 0;
   private errorRadius = 0;
+  /** Local edge-detection for the paint key, mirroring GameSession.updatePlaying's own
+   * wasPaintHeld tracking — see the comment where this is used in update(). */
+  private wasPaintHeld = false;
 
   /** Call every render frame with the guest's own live input. Returns the predicted player to
    * render in place of the authoritative one. */
@@ -60,6 +64,20 @@ export class PredictedPlayer {
     const dt = Math.min(0.05, (now - this.lastUpdateAt) / 1000);
     this.lastUpdateAt = now;
     updatePlayer(p, input, dt, now);
+
+    // GameSession.updatePlaying() resets cursorRadius to MIN_RADIUS the instant paint is
+    // released — that's host-authoritative code that never runs for local prediction, so without
+    // mirroring this part of it, EVERY single fire left the predicted radius oversized until
+    // reconcile() eventually noticed the resulting drift (an instant snap before, a slow fade
+    // most recently — neither is right, since this transition should just be instant, exactly
+    // like it already is in local/host play). Mirroring only the reset itself (not the actual
+    // splat, which stays host-only so it doesn't double-fire) means there's no drift to correct
+    // for this extremely common transition at all.
+    if (this.wasPaintHeld && !input.paint) {
+      p.cursorRadius = MIN_RADIUS;
+      this.errorRadius = 0;
+    }
+    this.wasPaintHeld = input.paint;
 
     // Bleed off whatever fraction of the outstanding correction is due this frame, on top of
     // the locally-predicted physics above — local movement/charging still feels immediate, it's
@@ -116,5 +134,6 @@ export class PredictedPlayer {
     this.errorX = 0;
     this.errorY = 0;
     this.errorRadius = 0;
+    this.wasPaintHeld = false;
   }
 }
