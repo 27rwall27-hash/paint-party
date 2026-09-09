@@ -2,10 +2,8 @@ import {
   CANVAS_H,
   CANVAS_W,
   GROUND_Y_FRACTION,
-  HIT_LINE_FRACTION,
   JUMP_AIRTIME_MS,
   JUMP_ARC_HEIGHT_PX,
-  OBSTACLE_SPAWN_FRACTION,
   POINTS_BY_RANK,
   RACER_COUNT,
   SINGLE_PHASE_MS,
@@ -89,26 +87,28 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   ctx.lineTo(CANVAS_W, groundY + radius + 4);
   ctx.stroke();
 
+  // One shared obstacle for the whole race — slides across the FULL band width, right edge to
+  // left edge, reaching each racer's column at a different moment purely because they're
+  // standing at a different x (see RaceInstance.reachTimeForRank). Drawn once per band, not once
+  // per racer.
+  if (race.obstacle) {
+    const progress = obstacleProgress(race.obstacle, now);
+    const obstacleX = CANVAS_W - progress * CANVAS_W;
+    ctx.fillStyle = "#5c4a2e";
+    ctx.fillRect(obstacleX - 6, groundY - radius - 8, 12, radius + 12);
+  }
+
   race.racers.forEach((racer, rank) => {
     const identity = identitiesById.get(racer.identityId);
     if (!identity) return;
     // Rank 0 (1st place) draws RIGHTMOST, last place draws LEFTMOST — a failed jump visibly
     // knocks that racer's column to the far left, matching "knocked off screen to the left,
-    // rejoin the horizontal line at the back".
+    // rejoin the horizontal line at the back". Also the order the shared obstacle reaches
+    // them in: rightmost (1st place) first, leftmost (last place) last.
     const displaySlot = RACER_COUNT - 1 - rank;
     const colLeft = displaySlot * (colWidth + COLUMN_GAP);
-    const runnerX = colLeft + colWidth * HIT_LINE_FRACTION;
+    const runnerX = colLeft + colWidth / 2;
     const isHuman = identity.id === 0;
-
-    if (racer.obstacle) {
-      // Slides in from the column's right edge toward the runner's own x — left-facing motion,
-      // same direction the original game's obstacles approach from.
-      const progress = obstacleProgress(racer.obstacle, now);
-      const spawnX = colLeft + colWidth * OBSTACLE_SPAWN_FRACTION;
-      const obstacleX = spawnX + progress * (runnerX - spawnX);
-      ctx.fillStyle = "#5c4a2e";
-      ctx.fillRect(obstacleX - 6, groundY - radius - 8, 12, radius + 12);
-    }
 
     let jumpOffset = 0;
     if (isAirborne(racer, now)) {
@@ -130,18 +130,17 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     ctx.fillStyle = identity.color;
     ctx.fill();
 
-    const colCenterX = colLeft + colWidth / 2;
     ctx.fillStyle = "rgba(255,255,255,0.4)";
     ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(`${rank + 1}`, colCenterX, y + 14);
+    ctx.fillText(`${rank + 1}`, runnerX, y + 14);
 
     ctx.fillStyle = "#fff";
     ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillText(identity.name, colCenterX, groundY + radius + 8);
+    ctx.fillText(identity.name, runnerX, groundY + radius + 8);
   });
 }
 

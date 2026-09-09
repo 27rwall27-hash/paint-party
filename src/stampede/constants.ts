@@ -35,47 +35,46 @@ export const JUMP_AIRTIME_MS = 550;
 // A jump's upward arc peaks at this fraction of the way through its airtime.
 export const JUMP_ARC_HEIGHT_PX = 46;
 
-// Each of the 8 racers in a race has their OWN independently-scheduled obstacle stream (spawns at
-// different times per racer — see RaceInstance) but every obstacle in a given race travels at the
-// same shared pace: expressed directly as a travel TIME (spawn -> hit-line), not a pixel speed, so
-// it's automatically scale-invariant as bands shrink across phases (a column half as tall doesn't
-// implicitly make the game harder on top of the intentional difficulty ramp below).
-export const PHASE_BASE_REACTION_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
-  SINGLE: 2200,
-  TWO_WAY: 1850,
-  THREE_WAY: 1450,
+// ONE shared obstacle per race — not one per racer. It sweeps across the whole band once per
+// wave, right to left, so it reaches the current 1st place (rightmost column) almost immediately
+// and the current last place (leftmost column) last — each racer still jumps at a different
+// moment, purely because they're standing at a different x, exactly like a single hurdle passing
+// down a lined-up row of people. LEAD_IN is the time from spawn to reaching the FIRST column —
+// every racer's guaranteed minimum reaction window, regardless of rank — and COLUMN_GAP is the
+// extra time between reaching each successive column after that (so a straggler in back gets
+// progressively more warning, having watched it clear everyone ahead of them first). Both are
+// travel TIMES, not pixel speeds, so this stays scale-invariant as bands shrink across phases.
+export const PHASE_BASE_LEAD_IN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
+  SINGLE: 1900,
+  TWO_WAY: 1550,
+  THREE_WAY: 1250,
 };
-// A race's own reaction time shrinks linearly over its first RACE_RAMP_MS of life, then holds at
-// the floor — so a long-lived continuing race (top/middle band) still gets meaningfully harder
+export const PHASE_BASE_COLUMN_GAP_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
+  SINGLE: 150,
+  TWO_WAY: 130,
+  THREE_WAY: 110,
+};
+// A race's own lead-in/column-gap shrink linearly over its first RACE_RAMP_MS of life, then hold
+// at the floor — so a long-lived continuing race (top/middle band) still gets meaningfully harder
 // over time, not just at phase boundaries.
 export const RACE_RAMP_MS = 20_000;
-export const RACE_RAMP_REACTION_FLOOR_MS = 950;
+export const RACE_RAMP_LEAD_IN_FLOOR_MS = 800;
+export const RACE_RAMP_COLUMN_GAP_FLOOR_MS = 60;
 
-// Base gap between one obstacle and the next FOR THE SAME RACER, per phase — RACE_RAMP_MS tightens
-// this too, down to RACE_RAMP_SPAWN_FLOOR_MS. Each actual spawn jitters this by +/-
-// SPAWN_INTERVAL_JITTER so 8 racers sharing the same formula still desync from each other over
-// time instead of just drifting by whatever fixed offset they happened to start with.
+// Gap between one wave fully clearing the last column and the next wave spawning.
 export const PHASE_BASE_SPAWN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
-  SINGLE: 1800,
-  TWO_WAY: 1500,
-  THREE_WAY: 1150,
+  SINGLE: 900,
+  TWO_WAY: 700,
+  THREE_WAY: 500,
 };
-export const RACE_RAMP_SPAWN_FLOOR_MS = 750;
-export const SPAWN_INTERVAL_JITTER = 0.3;
+export const RACE_RAMP_SPAWN_FLOOR_MS = 350;
 
 // Ground level within a band — a fraction of the band's own height where every runner stands and
-// every obstacle travels, matching the classic endless-runner convention (the T-Rex game this is
-// modeled on): characters and obstacles share one ground line, obstacles move HORIZONTALLY along
-// it, and jumping is the only thing that moves a runner off it (briefly, vertically).
+// the shared obstacle travels, matching the classic endless-runner convention (the T-Rex game
+// this is modeled on): characters and the obstacle share one ground line, the obstacle moves
+// HORIZONTALLY along it (right to left, across the WHOLE band width now — see RaceInstance), and
+// jumping is the only thing that moves a runner off it (briefly, vertically).
 export const GROUND_Y_FRACTION = 0.8;
-// Where a column's obstacle track sits, as a fraction of the COLUMN'S OWN WIDTH — 0 = the
-// column's left edge, 1 = its right edge. The hit-line (where the runner stands, and where an
-// obstacle resolves) sits near the left; the obstacle "spawns" (progress 0) near the right and
-// slides toward it — same left-to-right-facing motion as the original game, just miniaturized to
-// fit inside one racer's own ~150px-wide column instead of the full screen. Fractions, not
-// pixels, so this scales automatically with column width too.
-export const OBSTACLE_SPAWN_FRACTION = 0.94;
-export const HIT_LINE_FRACTION = 0.24;
 
 // Per-identity base jump-success chance, randomized once at game start within this range — most
 // CPUs usually clear a jump but occasionally fail, giving the human a real chance without making
