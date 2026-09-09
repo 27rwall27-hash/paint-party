@@ -7,7 +7,7 @@
 
 import * as audio from "./audio.ts";
 import { loadCustomAudio, type CustomAudioSet } from "./customAudio.ts";
-import { FINALE_INTENSITY_STEP } from "./constants.ts";
+import { FINALE_INTENSITY_STEP_PCT } from "./constants.ts";
 
 // music/start/finish are 22% quieter than their original levels (0.35/0.5/0.5); start/finish/
 // victory are then a further 10% quieter still (0.351/0.351/0.45).
@@ -15,7 +15,7 @@ const DEFAULT_VOLUME = { music: 0.273, start: 0.351, finish: 0.351, victory: 0.4
 
 let custom: CustomAudioSet = { music: null, start: null, finish: null, victory: null, drumroll: null };
 /** The current round's own tempo multiplier (1.08 ** roundIndex) — the finale's intensity ramp
- * compounds on top of this rather than replacing it. */
+ * adds to this rather than replacing it. */
 let roundSpeedMultiplier = 1;
 let musicStarted = false;
 
@@ -89,9 +89,10 @@ export function setRoundSpeed(roundIndex: number): void {
 
 /** Finale-only: called every FINALE_INTENSITY_INTERVAL_MS with an incrementing level — ramps
  * tempo AND pitch together on top of the round's own baseline speed (level 0 == baseline, no
- * pitch shift yet), for a "speeding up" panic effect as the last round wears on. */
+ * pitch shift yet), for a "speeding up" panic effect as the last round wears on. Linear, not
+ * compounding — level 40 is +20% (40 * 0.5%), not 1.005^40. */
 export function setFinaleIntensity(level: number): void {
-  const multiplier = roundSpeedMultiplier * FINALE_INTENSITY_STEP ** level;
+  const multiplier = roundSpeedMultiplier * (1 + level * FINALE_INTENSITY_STEP_PCT);
   if (custom.music) {
     custom.music.preservesPitch = false;
     custom.music.playbackRate = multiplier;

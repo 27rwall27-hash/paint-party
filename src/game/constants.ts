@@ -77,10 +77,11 @@ export const FINAL_BURST_AT_MS = 10000;
 export const FINAL_BURST_COUNT = 4;
 
 // The finale's music gets both faster AND higher-pitched every FINALE_INTENSITY_INTERVAL_MS spent
-// actually playing that round (compounding, on top of the round's normal per-round tempo bump) —
-// a rising "vinyl speeding up" panic effect exclusive to the last round.
-export const FINALE_INTENSITY_INTERVAL_MS = 5000;
-export const FINALE_INTENSITY_STEP = 1.05;
+// actually playing that round — a rising "vinyl speeding up" panic effect exclusive to the last
+// round. Linear, not compounding: at level N the multiplier is (1 + N * FINALE_INTENSITY_STEP_PCT)
+// on top of the round's own normal per-round tempo bump, not repeated multiplication.
+export const FINALE_INTENSITY_INTERVAL_MS = 1000;
+export const FINALE_INTENSITY_STEP_PCT = 0.005;
 
 export const SHRINK_MULTIPLIER = 0.4;
 export const SHRINK_DURATION_MS = 6000;
