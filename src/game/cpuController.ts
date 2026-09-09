@@ -85,6 +85,17 @@ interface BotHistory {
   lastOutlineIndex: number | undefined;
 }
 
+/** A shot that's already committed to land at (x, y) but hasn't actually painted yet — either a
+ * real in-flight Projectile (GameSession.projectiles, still ~0-380ms from landing) or, for the one
+ * shot analyzeCoverage can never find there in time (see refreshTarget), a synthesized stand-in for
+ * the release this tick's own decide() call just triggered. */
+interface PendingSplat {
+  ownerId: number;
+  x: number;
+  y: number;
+  radius: number;
+}
+
 /** A random point within AIM_JITTER_FRACTION of `radius` from (cx, cy), uniformly distributed
  * over the disc's AREA — not over its radius. Sampling distance directly from Math.random() (the
  * original approach here) puts far more points near the center than out toward the edge: the ring
@@ -101,12 +112,20 @@ function jitterAim(cx: number, cy: number, radius: number): { x: number; y: numb
   return { x: cx + Math.cos(angle) * dist, y: cy + Math.sin(angle) * dist };
 }
 
-/** One pass over an outline's actual painted pixels — who's covered what, right now. Real (if
- * approximate — bounding-box-relative, same convention scoring.ts already uses) coverage data,
- * not a guess from memory of past shots. Expensive-ish (a full getImageData + per-pixel nearest-
- * color match, same approach scoring.ts's scoreOutline uses for real scoring) so this is only
- * called once per target pick / once per shot fired, never every tick. */
-function analyzeCoverage(outline: Outline, players: Player[], selfId: number) {
+/** One pass over an outline's actual painted pixels — who's covered what, right now — PLUS any
+ * `pending` shots already committed to land there but not yet actually painted (see PendingSplat):
+ * without this, a bot re-reading coverage the instant after releasing its own shot sees the exact
+ * same "still empty" picture it saw right before firing (paint only actually lands in
+ * GameSession.landProjectile, ~PROJECTILE_DURATION_MS later) and can decide there's still plenty
+ * of unclaimed room left, walk back, and fire a second, redundant shot at essentially the same spot
+ * before the first one has even hit the canvas. Pending shots are folded in as a sparse overlay —
+ * pixel -> claiming ownerId, as if already landed — so both the aggregate fractions below AND
+ * classify() (used for per-candidate aim scoring) agree with each other. Real (if approximate —
+ * bounding-box-relative, same convention scoring.ts already uses) coverage data, not a guess from
+ * memory of past shots. Expensive-ish (a full getImageData + per-pixel nearest-color match, same
+ * approach scoring.ts's scoreOutline uses for real scoring) so this is only called once per target
+ * pick / once per shot fired, never every tick. */
+function analyzeCoverage(outline: Outline, players: Player[], selfId: number, pending: PendingSplat[] = []) {
   const { x, y, w, h } = outline.bbox;
   const data = outline.paintCtx.getImageData(x, y, w, h).data;
   const palette = players.map((p) => ({ id: p.id, rgb: hexToRgb(p.color) }));
@@ -133,6 +152,30 @@ function analyzeCoverage(outline: Outline, players: Player[], selfId: number) {
   for (let i = 0; i < data.length; i += 4) {
     const id = classifyIndex(i);
     if (id !== -1) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+
+  const overlay = new Map<number, number>();
+  for (const proj of pending) {
+    const localCx = proj.x - x;
+    const localCy = proj.y - y;
+    const r = proj.radius;
+    const minLx = Math.max(0, Math.floor(localCx - r));
+    const maxLx = Math.min(w - 1, Math.ceil(localCx + r));
+    const minLy = Math.max(0, Math.floor(localCy - r));
+    const maxLy = Math.min(h - 1, Math.ceil(localCy + r));
+    for (let ly = minLy; ly <= maxLy; ly++) {
+      for (let lx = minLx; lx <= maxLx; lx++) {
+        const dx = lx - localCx;
+        const dy = ly - localCy;
+        if (dx * dx + dy * dy > r * r) continue;
+        const pixelIdx = ly * w + lx;
+        const priorId = overlay.get(pixelIdx) ?? classifyIndex(pixelIdx * 4);
+        if (priorId === proj.ownerId) continue;
+        if (priorId !== -1) counts.set(priorId, (counts.get(priorId) ?? 0) - 1);
+        counts.set(proj.ownerId, (counts.get(proj.ownerId) ?? 0) + 1);
+        overlay.set(pixelIdx, proj.ownerId);
+      }
+    }
   }
 
   let leaderId: number | null = null;
@@ -167,7 +210,8 @@ function analyzeCoverage(outline: Outline, players: Player[], selfId: number) {
       const lx = Math.floor(px - x);
       const ly = Math.floor(py - y);
       if (lx < 0 || ly < 0 || lx >= w || ly >= h) return "outside";
-      const id = classifyIndex((ly * w + lx) * 4);
+      const pixelIdx = ly * w + lx;
+      const id = overlay.get(pixelIdx) ?? classifyIndex(pixelIdx * 4);
       if (id === -1) return "empty";
       if (id === selfId) return "self";
       if (id === leaderId) return "leader";
@@ -295,7 +339,11 @@ export class CpuController {
 
     const charging = !(dist <= arrivalRadius && chargeFrac >= bot.fireThreshold);
     if (bot.wasCharging && !charging) {
-      this.refreshTarget(bot, player, session, now);
+      // This tick's release fires the projectile inside session.update(), which runs AFTER
+      // CpuController.update() (see hostLoop.ts) — so it doesn't exist in session.projectiles yet
+      // at this exact instant. Hand refreshTarget a synthesized stand-in for it so the coverage
+      // read right after firing isn't blind to the shot that's about to land.
+      this.refreshTarget(bot, player, session, now, { ownerId: player.id, x: player.x, y: player.y, radius: player.cursorRadius });
     }
     bot.wasCharging = charging;
 
@@ -309,10 +357,11 @@ export class CpuController {
   }
 
   /** A shot just landed (a normal release, or a periodic check-in while machine-gunning — see
-   * MACHINEGUN_REFRESH_MS) — re-read this outline's actual coverage (it just changed) and either
-   * pick a fresh, still-useful aim point there or, if nothing productive is left, retarget
-   * immediately instead of running out the rest of the dwell re-covering already-claimed ground. */
-  private refreshTarget(bot: BotState, player: Player, session: GameSession, now: number): void {
+   * MACHINEGUN_REFRESH_MS) — re-read this outline's actual coverage (it just changed, or is about
+   * to — see `justFired`) and either pick a fresh, still-useful aim point there or, if nothing
+   * productive is left, retarget immediately instead of running out the rest of the dwell
+   * re-covering already-claimed ground. */
+  private refreshTarget(bot: BotState, player: Player, session: GameSession, now: number, justFired?: PendingSplat): void {
     if (bot.outlineIndex === undefined) {
       // Power-up — a one-off claim, not a coverage area, just re-jitter normally.
       const aim = jitterAim(bot.centerX, bot.centerY, bot.targetRadius);
@@ -322,7 +371,7 @@ export class CpuController {
     }
     const outline = session.outlines[bot.outlineIndex];
     if (!outline) return;
-    const coverage = analyzeCoverage(outline, activePlayers(session.players), player.id);
+    const coverage = analyzeCoverage(outline, activePlayers(session.players), player.id, this.pendingSplatsFor(outline, session, justFired));
     if (coverage.selfFraction >= SELF_DOMINANT_FRACTION || (coverage.emptyFraction < 0.05 && (coverage.leaderId === null || coverage.leaderId === player.id))) {
       bot.retargetAt = now; // nothing left worth aiming for here — move on right away
       return;
@@ -330,6 +379,18 @@ export class CpuController {
     const aim = pickScoredAim(coverage, bot.centerX, bot.centerY, bot.targetRadius);
     bot.targetX = aim.x;
     bot.targetY = aim.y;
+  }
+
+  /** Every shot that's already committed to land on `outline` but hasn't actually painted there
+   * yet — real in-flight projectiles (any owner: an opponent's shot en route matters just as much
+   * as this bot's own for "is this spot actually still worth aiming at") plus, when supplied, one
+   * synthesized stand-in for a release this exact tick hasn't pushed into session.projectiles yet. */
+  private pendingSplatsFor(outline: Outline, session: GameSession, extra?: PendingSplat): PendingSplat[] {
+    const pending: PendingSplat[] = session.projectiles
+      .filter((p) => outline.mayOverlap(p.x, p.y, p.radius))
+      .map((p) => ({ ownerId: p.ownerId, x: p.x, y: p.y, radius: p.radius }));
+    if (extra) pending.push(extra);
+    return pending;
   }
 
   private historyFor(playerId: number): BotHistory {
@@ -403,7 +464,7 @@ export class CpuController {
       // Small stable per-bot bias so multiple bots don't all rank outlines identically and pile
       // onto whichever's nearest to the group as a whole.
       const bias = ((player.id * 37 + i * 17) % 100) * 2.5;
-      const coverage = analyzeCoverage(o, activePlayers(session.players), player.id);
+      const coverage = analyzeCoverage(o, activePlayers(session.players), player.id, this.pendingSplatsFor(o, session));
       const contestBonus =
         coverage.leaderId !== null && coverage.leaderId !== player.id
           ? CONTEST_LEADER_BASE_BONUS + coverage.leaderFraction * CONTEST_LEADER_DOMINANCE_SCALE
