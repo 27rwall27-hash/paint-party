@@ -26,17 +26,37 @@ const MOVE_DEADZONE = 8;
 // bots ignore the actual objective, just enough that they visibly go out of their way sometimes.
 const POWERUP_CHASE_CHANCE = 0.45;
 const POWERUP_CHASE_MAX_DIST = 420;
+// How far a per-shot aim point can land from the target's true center, as a fraction of its
+// radius — without this, every shot for the whole target-dwell period (and every future dwell on
+// the same outline) lands on the exact same pixel, since aiming was just "the outline's center."
+const AIM_JITTER_FRACTION = 0.65;
 
 const NEUTRAL: PlayerInputState = { up: false, down: false, left: false, right: false, paint: false };
 
 interface BotState {
+  /** The target's true center — outline or power-up midpoint. Aiming jitters around this, but
+   * this itself only changes on a real retarget. */
+  centerX: number;
+  centerY: number;
+  /** Where this particular approach/shot is actually aiming — a jittered point near centerX/Y,
+   * re-rolled every time a shot fires (see the release-edge check in decide()) so consecutive
+   * shots at the same outline land in different spots instead of stacking on one pixel. */
   targetX: number;
   targetY: number;
   targetRadius: number;
   isPowerup: boolean;
   fireThreshold: number;
   retargetAt: number;
+  wasCharging: boolean;
   input: PlayerInputState;
+}
+
+/** A random point within AIM_JITTER_FRACTION of `radius` from (cx, cy) — small radius (a
+ * power-up) gets a tight jitter, a big outline gets real spread across its surface. */
+function jitterAim(cx: number, cy: number, radius: number): { x: number; y: number } {
+  const angle = Math.random() * Math.PI * 2;
+  const dist = Math.random() * radius * AIM_JITTER_FRACTION;
+  return { x: cx + Math.cos(angle) * dist, y: cy + Math.sin(angle) * dist };
 }
 
 /** Drives every CPU-controlled player's input, one decision per tick, computed fresh from the
@@ -92,14 +112,25 @@ export class CpuController {
     const maxR = currentMaxRadius(player, now);
     const chargeFrac = (player.cursorRadius - MIN_RADIUS) / (maxR - MIN_RADIUS);
 
+    const charging = !(dist <= arrivalRadius && chargeFrac >= bot.fireThreshold);
+    // Release edge (was charging, now firing) — pick a fresh aim point near the same target's
+    // center for the NEXT approach, so a bot painting the same outline for a while spreads its
+    // shots across it instead of stacking every single one on the exact center pixel.
+    if (bot.wasCharging && !charging) {
+      const aim = jitterAim(bot.centerX, bot.centerY, bot.targetRadius);
+      bot.targetX = aim.x;
+      bot.targetY = aim.y;
+    }
+    bot.wasCharging = charging;
+
     bot.input = {
       up: dy < -MOVE_DEADZONE,
       down: dy > MOVE_DEADZONE,
       left: dx < -MOVE_DEADZONE,
       right: dx > MOVE_DEADZONE,
       // Charge continuously on the way in; release the instant both requirements are met. This
-      // naturally repeats (recharge, refire) at the same spot for as long as the target lasts.
-      paint: !(dist <= arrivalRadius && chargeFrac >= bot.fireThreshold),
+      // naturally repeats (recharge, refire) at a fresh nearby spot for as long as the target lasts.
+      paint: charging,
     };
   }
 
@@ -107,12 +138,27 @@ export class CpuController {
    * next scheduled retarget — checked every tick so a bot doesn't keep charging toward empty air. */
   private targetIsGone(bot: BotState, session: GameSession): boolean {
     if (!bot.isPowerup) return false;
-    return !session.powerups.some((p) => p.state === "active" && p.cx === bot.targetX && p.cy === bot.targetY);
+    return !session.powerups.some((p) => p.state === "active" && p.cx === bot.centerX && p.cy === bot.centerY);
   }
 
   private pickTarget(player: Player, session: GameSession, now: number): BotState {
     const retargetAt = now + RETARGET_MIN_MS + Math.random() * (RETARGET_MAX_MS - RETARGET_MIN_MS);
     const fireThreshold = FIRE_THRESHOLD_MIN + Math.random() * (FIRE_THRESHOLD_MAX - FIRE_THRESHOLD_MIN);
+    const makeState = (cx: number, cy: number, radius: number, isPowerup: boolean): BotState => {
+      const aim = jitterAim(cx, cy, radius);
+      return {
+        centerX: cx,
+        centerY: cy,
+        targetX: aim.x,
+        targetY: aim.y,
+        targetRadius: radius,
+        isPowerup,
+        fireThreshold,
+        retargetAt,
+        wasCharging: false,
+        input: NEUTRAL,
+      };
+    };
 
     const activePowerups = session.powerups.filter((p) => p.state === "active");
     if (activePowerups.length > 0 && Math.random() < POWERUP_CHASE_CHANCE) {
@@ -126,12 +172,12 @@ export class CpuController {
         }
       }
       if (nearestDist <= POWERUP_CHASE_MAX_DIST) {
-        return { targetX: nearest.cx, targetY: nearest.cy, targetRadius: nearest.radius, isPowerup: true, fireThreshold, retargetAt, input: NEUTRAL };
+        return makeState(nearest.cx, nearest.cy, nearest.radius, true);
       }
     }
 
     if (session.outlines.length === 0) {
-      return { targetX: player.x, targetY: player.y, targetRadius: 0, isPowerup: false, fireThreshold, retargetAt, input: NEUTRAL };
+      return makeState(player.x, player.y, 0, false);
     }
     // Nearest outline wins most of the time, but each bot has its own small stable bias per
     // outline (deterministic from playerId+index, not re-rolled every pick) so multiple bots
@@ -147,6 +193,6 @@ export class CpuController {
         best = o;
       }
     });
-    return { targetX: best.cx, targetY: best.cy, targetRadius: best.radius, isPowerup: false, fireThreshold, retargetAt, input: NEUTRAL };
+    return makeState(best.cx, best.cy, best.radius, false);
   }
 }

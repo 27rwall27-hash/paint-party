@@ -55,14 +55,12 @@ export const ALL_BOUND_KEYS = new Set(
 export const PRESET_COLORS: string[] = [
   "#e63946", // red
   "#f3722c", // orange
-  "#f9c74f", // yellow
   "#ffd60a", // gold
   "#90be6d", // light green
   "#2ecc71", // green
   "#43aa8b", // teal
   "#277da1", // steel blue
   "#3a86ff", // bright blue
-  "#4361ee", // indigo blue
   "#5e60ce", // indigo
   "#9d4edd", // purple
   "#c77dff", // lavender
