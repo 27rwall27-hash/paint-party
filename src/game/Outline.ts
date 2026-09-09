@@ -161,6 +161,33 @@ export class Outline {
     return this.shapeMask[ly * this.bbox.w + lx] === 1;
   }
 
+  /** True if a splat of `radius` centered at (x, y) would actually paint at least one real pixel
+   * of this shape — a much more forgiving question than containsPoint(x, y), which only asks about
+   * the exact center point. Use this to decide whether FIRING from here would be a real hit,
+   * rather than a total miss; containsPoint is for picking a good aim point in the first place. A
+   * splat with its center just outside a thin silhouette can still clip a real edge of it, and
+   * demanding the exact center pixel be on-shape before ever releasing (rather than just "close
+   * enough that this fires at all") can leave a bot stuck fully charged forever on a shape too
+   * thin for its own arrival tolerance to reliably land dead-center on. */
+  overlapsShape(x: number, y: number, radius: number): boolean {
+    const localCx = x - this.bbox.x;
+    const localCy = y - this.bbox.y;
+    const minLx = Math.max(0, Math.floor(localCx - radius));
+    const maxLx = Math.min(this.bbox.w - 1, Math.ceil(localCx + radius));
+    const minLy = Math.max(0, Math.floor(localCy - radius));
+    const maxLy = Math.min(this.bbox.h - 1, Math.ceil(localCy + radius));
+    const r2 = radius * radius;
+    for (let ly = minLy; ly <= maxLy; ly++) {
+      for (let lx = minLx; lx <= maxLx; lx++) {
+        const dx = lx - localCx;
+        const dy = ly - localCy;
+        if (dx * dx + dy * dy > r2) continue;
+        if (this.shapeMask[ly * this.bbox.w + lx] === 1) return true;
+      }
+    }
+    return false;
+  }
+
   /** Paints the main blob plus a scatter of smaller satellite droplets for an explosive impact. */
   /**
    * The core is always a fully solid circle at `radius` — exactly what the charging cursor

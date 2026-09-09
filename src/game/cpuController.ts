@@ -384,10 +384,13 @@ export class CpuController {
     // Statue of Liberty) that much slop is enough to have drifted off the real shape entirely even
     // though the aim point itself (picked via jitterAimInside/pickScoredAim) was verified on it.
     // Firing from there would land zero visible paint — a "complete miss" — despite every upstream
-    // check having been correct. Require the CURRENT position to actually be on real shape ground
-    // before releasing, not just close to the target.
+    // check having been correct. Require the shot to actually touch real shape ground before
+    // releasing — overlapsShape, NOT containsPoint: demanding the exact center pixel land on-shape
+    // (containsPoint) is too strict once MOVE_DEADZONE stops the bot a few px short of the precise
+    // aim point on something this thin, and was leaving bots stuck fully charged forever, never
+    // satisfying it, until the retarget timeout gave up and walked them away without ever firing.
     const outline = bot.outlineIndex !== undefined ? session.outlines[bot.outlineIndex] : undefined;
-    const onTarget = !outline || outline.containsPoint(player.x, player.y);
+    const onTarget = !outline || outline.overlapsShape(player.x, player.y, player.cursorRadius);
     const charging = !(dist <= arrivalRadius && chargeFrac >= bot.fireThreshold && onTarget);
     if (bot.wasCharging && !charging) {
       // This tick's release fires the projectile inside session.update(), which runs AFTER
