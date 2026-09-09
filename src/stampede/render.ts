@@ -4,6 +4,8 @@ import {
   GROUND_Y_FRACTION,
   JUMP_AIRTIME_MS,
   JUMP_ARC_HEIGHT_PX,
+  PACK_LEFT_FRACTION,
+  PACK_WIDTH_FRACTION,
   POINTS_BY_RANK,
   RACER_COUNT,
   SINGLE_PHASE_MS,
@@ -71,13 +73,29 @@ function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number,
   ctx.restore();
 }
 
+/** A small triangular spike sitting on the ground line, tip up — placeholder obstacle shape. */
+function drawSpike(ctx: CanvasRenderingContext2D, x: number, groundY: number, size: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x, groundY - size * 1.6);
+  ctx.lineTo(x - size, groundY + 2);
+  ctx.lineTo(x + size, groundY + 2);
+  ctx.closePath();
+  ctx.fillStyle = "#8a6d3b";
+  ctx.fill();
+}
+
 function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number): void {
   drawBandBackground(ctx, y, h, now);
 
-  const colWidth = (CANVAS_W - COLUMN_GAP * (RACER_COUNT - 1)) / RACER_COUNT;
+  // The 8 racers cluster near the left of the band (not spread across its full width) — leaves a
+  // long, clearly visible runway on the right where the obstacle is approaching from, and keeps
+  // the pack itself tight.
+  const packLeft = CANVAS_W * PACK_LEFT_FRACTION;
+  const packWidth = CANVAS_W * PACK_WIDTH_FRACTION;
+  const colWidth = (packWidth - COLUMN_GAP * (RACER_COUNT - 1)) / RACER_COUNT;
   // One shared ground line for the whole band — every runner stands on it, every obstacle travels
-  // along it (horizontally, within its own column), and jumping is the only thing that moves a
-  // runner off of it, same convention as the original endless-runner this is modeled on.
+  // along it (horizontally), and jumping is the only thing that moves a runner off of it, same
+  // convention as the original endless-runner this is modeled on.
   const groundY = y + h * GROUND_Y_FRACTION;
   const radius = Math.min(colWidth * 0.28, 17);
 
@@ -87,15 +105,18 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   ctx.lineTo(CANVAS_W, groundY + radius + 4);
   ctx.stroke();
 
-  // One shared obstacle for the whole race — slides across the FULL band width, right edge to
-  // left edge, reaching each racer's column at a different moment purely because they're
-  // standing at a different x (see RaceInstance.reachTimeForRank). Drawn once per band, not once
-  // per racer.
+  const slotX = (slot: number) => packLeft + slot * (colWidth + COLUMN_GAP) + colWidth / 2;
+
+  // One shared obstacle for the whole race — slides from near the band's right edge to the
+  // pack's own leftmost column, reaching each racer at a different moment purely because
+  // they're standing at a different x (see RaceInstance.reachTimeForRank). Drawn once per band,
+  // not once per racer.
   if (race.obstacle) {
     const progress = obstacleProgress(race.obstacle, now);
-    const obstacleX = CANVAS_W - progress * CANVAS_W;
-    ctx.fillStyle = "#5c4a2e";
-    ctx.fillRect(obstacleX - 6, groundY - radius - 8, 12, radius + 12);
+    const spawnX = CANVAS_W - 24;
+    const targetX = slotX(0);
+    const obstacleX = spawnX + progress * (targetX - spawnX);
+    drawSpike(ctx, obstacleX, groundY, Math.max(7, radius * 0.55));
   }
 
   race.racers.forEach((racer, rank) => {
@@ -104,10 +125,9 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     // Rank 0 (1st place) draws RIGHTMOST, last place draws LEFTMOST — a failed jump visibly
     // knocks that racer's column to the far left, matching "knocked off screen to the left,
     // rejoin the horizontal line at the back". Also the order the shared obstacle reaches
-    // them in: rightmost (1st place) first, leftmost (last place) last.
-    const displaySlot = RACER_COUNT - 1 - rank;
-    const colLeft = displaySlot * (colWidth + COLUMN_GAP);
-    const runnerX = colLeft + colWidth / 2;
+    // them in: rightmost (1st place) first, leftmost (last place) last. racer.displaySlot
+    // slides toward this target rather than snapping to it — see RaceInstance.updateRace.
+    const runnerX = slotX(racer.displaySlot);
     const isHuman = identity.id === 0;
 
     let jumpOffset = 0;

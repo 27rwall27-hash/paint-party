@@ -45,21 +45,21 @@ export const JUMP_ARC_HEIGHT_PX = 46;
 // progressively more warning, having watched it clear everyone ahead of them first). Both are
 // travel TIMES, not pixel speeds, so this stays scale-invariant as bands shrink across phases.
 export const PHASE_BASE_LEAD_IN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
-  SINGLE: 1900,
-  TWO_WAY: 1550,
-  THREE_WAY: 1250,
+  SINGLE: 3200,
+  TWO_WAY: 2600,
+  THREE_WAY: 2000,
 };
 export const PHASE_BASE_COLUMN_GAP_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
-  SINGLE: 150,
-  TWO_WAY: 130,
-  THREE_WAY: 110,
+  SINGLE: 220,
+  TWO_WAY: 190,
+  THREE_WAY: 160,
 };
 // A race's own lead-in/column-gap shrink linearly over its first RACE_RAMP_MS of life, then hold
 // at the floor — so a long-lived continuing race (top/middle band) still gets meaningfully harder
 // over time, not just at phase boundaries.
 export const RACE_RAMP_MS = 20_000;
-export const RACE_RAMP_LEAD_IN_FLOOR_MS = 800;
-export const RACE_RAMP_COLUMN_GAP_FLOOR_MS = 60;
+export const RACE_RAMP_LEAD_IN_FLOOR_MS = 1400;
+export const RACE_RAMP_COLUMN_GAP_FLOOR_MS = 100;
 
 // Gap between one wave fully clearing the last column and the next wave spawning.
 export const PHASE_BASE_SPAWN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
@@ -75,6 +75,21 @@ export const RACE_RAMP_SPAWN_FLOOR_MS = 350;
 // HORIZONTALLY along it (right to left, across the WHOLE band width now — see RaceInstance), and
 // jumping is the only thing that moves a runner off it (briefly, vertically).
 export const GROUND_Y_FRACTION = 0.8;
+
+// The 8 racers cluster together near the LEFT of the band (not spread across its full width) —
+// leaves a long, clearly visible runway on the right for the obstacle to approach across before
+// it ever reaches anyone, and keeps the pack itself tight instead of spanning the whole screen.
+// Both fractions of the band's own width.
+export const PACK_LEFT_FRACTION = 0.03;
+export const PACK_WIDTH_FRACTION = 0.42;
+
+// How fast a racer's drawn position slides toward their current rank's column when it changes,
+// in pack-column-widths per second — rank changes used to snap instantly, which was disorienting
+// to watch while also trying to time your own jump (someone failing elsewhere in the line could
+// silently teleport YOUR column sideways). At this rate the most extreme case (last place to
+// first, all in one motion) takes a bit over 2 seconds to visibly settle instead of happening in
+// a single frame.
+export const SLIDE_SPEED_SLOTS_PER_SEC = 3;
 
 // Per-identity base jump-success chance, randomized once at game start within this range — most
 // CPUs usually clear a jump but occasionally fail, giving the human a real chance without making

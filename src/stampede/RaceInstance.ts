@@ -11,6 +11,7 @@ import {
   RACE_RAMP_MS,
   RACE_RAMP_SPAWN_FLOOR_MS,
   RACER_COUNT,
+  SLIDE_SPEED_SLOTS_PER_SEC,
 } from "./constants.ts";
 import type { RacerIdentity } from "./identities.ts";
 
@@ -26,6 +27,12 @@ export interface RaceRacerState {
   /** This race's own roll for this identity — re-rolled fresh (jittered around a base skill) every
    * time a race is cloned, so the same identity can genuinely diverge across parallel races. */
   cpuSkill: number;
+  /** Continuous (not integer) left-to-right column position this racer is CURRENTLY drawn at —
+   * 0 = leftmost, RACER_COUNT-1 = rightmost. Slides toward their real current rank's column (see
+   * updateRace) rather than snapping instantly, so a rank change elsewhere in the line doesn't
+   * make every racer behind it teleport sideways on the same frame. render.ts reads this directly
+   * instead of recomputing a column index fresh from rank every frame. */
+  displaySlot: number;
 }
 
 export function isAirborne(racer: RaceRacerState, now: number): boolean {
@@ -94,10 +101,13 @@ function rampedValue(base: number, floor: number, race: RaceInstance, now: numbe
  * each racer here gets a fresh per-race jittered roll off of it. */
 export function createRaceInstance(order: RacerIdentity[], baseSkills: Map<number, number>, now: number, phase: RacePhase): RaceInstance {
   const race: RaceInstance = {
-    racers: order.map((identity) => ({
+    racers: order.map((identity, rank) => ({
       identityId: identity.id,
       jumpStartedAt: 0,
       cpuSkill: rollCpuSkill(baseSkills.get(identity.id) ?? CPU_BASE_SKILL_MIN),
+      // Starts already in place — no slide-in animation on a fresh race/clone, only on later
+      // rank changes.
+      displaySlot: RACER_COUNT - 1 - rank,
     })),
     obstacle: null,
     nextObstacleAt: now + 600,
@@ -118,7 +128,7 @@ export function rollBaseSkill(): number {
  * never from the CPU skill roll below. One obstacle at a time, shared by the whole race: it sweeps
  * across every current rank in turn (see reachTimeForRank), resolving each racer individually at
  * the instant it reaches THEIR column. */
-export function updateRace(race: RaceInstance, _dt: number, now: number, humanJumpRequested: boolean): void {
+export function updateRace(race: RaceInstance, dt: number, now: number, humanJumpRequested: boolean): void {
   if (!race.obstacle && now >= race.nextObstacleAt) {
     const leadInMs = rampedValue(PHASE_BASE_LEAD_IN_MS[race.phase], RACE_RAMP_LEAD_IN_FLOOR_MS, race, now);
     const columnGapMs = rampedValue(PHASE_BASE_COLUMN_GAP_MS[race.phase], RACE_RAMP_COLUMN_GAP_FLOOR_MS, race, now);
@@ -152,30 +162,41 @@ export function updateRace(race: RaceInstance, _dt: number, now: number, humanJu
   }
 
   const obstacle = race.obstacle;
-  if (!obstacle) return;
-
-  // Resolve any rank the sweep has now reached (or passed) that hasn't been resolved yet — a
-  // wave can reach several ranks within the same tick if frame time is coarse, so check all of
-  // them, not just the "next" one.
-  for (let rank = 0; rank < obstacle.order.length; rank++) {
-    if (obstacle.resolvedRanks[rank]) continue;
-    if (now < reachTimeForRank(obstacle, rank)) continue;
-    obstacle.resolvedRanks[rank] = true;
-    const racer = obstacle.order[rank]!;
-    if (!isAirborne(racer, now)) {
-      // Failed — sent to the back of the pack. This only touches the LIVE array (which decides
-      // future rendering/next-wave ranks); the obstacle's own reach-time schedule for the
-      // remaining not-yet-resolved ranks was fixed at spawn time and is unaffected.
-      const idx = race.racers.indexOf(racer);
-      if (idx !== -1) {
-        race.racers.splice(idx, 1);
-        race.racers.push(racer);
+  if (obstacle) {
+    // Resolve any rank the sweep has now reached (or passed) that hasn't been resolved yet — a
+    // wave can reach several ranks within the same tick if frame time is coarse, so check all of
+    // them, not just the "next" one.
+    for (let rank = 0; rank < obstacle.order.length; rank++) {
+      if (obstacle.resolvedRanks[rank]) continue;
+      if (now < reachTimeForRank(obstacle, rank)) continue;
+      obstacle.resolvedRanks[rank] = true;
+      const racer = obstacle.order[rank]!;
+      if (!isAirborne(racer, now)) {
+        // Failed — sent to the back of the pack. This only touches the LIVE array (which decides
+        // future rendering/next-wave ranks); the obstacle's own reach-time schedule for the
+        // remaining not-yet-resolved ranks was fixed at spawn time and is unaffected.
+        const idx = race.racers.indexOf(racer);
+        if (idx !== -1) {
+          race.racers.splice(idx, 1);
+          race.racers.push(racer);
+        }
       }
+    }
+
+    if (now - obstacle.spawnedAt >= totalSweepMs(obstacle)) {
+      race.obstacle = null;
+      race.nextObstacleAt = now + rampedValue(PHASE_BASE_SPAWN_MS[race.phase], RACE_RAMP_SPAWN_FLOOR_MS, race, now);
     }
   }
 
-  if (now - obstacle.spawnedAt >= totalSweepMs(obstacle)) {
-    race.obstacle = null;
-    race.nextObstacleAt = now + rampedValue(PHASE_BASE_SPAWN_MS[race.phase], RACE_RAMP_SPAWN_FLOOR_MS, race, now);
-  }
+  // Slide every racer's drawn position toward their current rank's column, rather than snapping
+  // instantly — runs every tick regardless of whether an obstacle is active, so a racer who just
+  // moved up (someone ahead of them failed) keeps gliding into place even between waves.
+  const maxStep = SLIDE_SPEED_SLOTS_PER_SEC * dt;
+  race.racers.forEach((racer, rank) => {
+    const target = RACER_COUNT - 1 - rank;
+    const diff = target - racer.displaySlot;
+    if (Math.abs(diff) <= maxStep) racer.displaySlot = target;
+    else racer.displaySlot += Math.sign(diff) * maxStep;
+  });
 }
