@@ -103,15 +103,19 @@ export interface PaintBatchPayload {
   events: PaintEvent[];
 }
 
-/** Host -> all: every player's position plus the live eraser swarm, broadcast every tick (30Hz) —
- * decoupled from the much heavier, throttled (~10Hz) SnapshotPayload so remote movement isn't
- * stuck interpolating/extrapolating across a 100ms-stale gap. Both are small (a handful of tiny
- * entries), so the extra message volume is cheap. Erasers aren't purely time-computable like the
- * sweep brush (their heading changes randomly and bounces off walls), so they still need this
- * fresher raw sync rather than a formula — hostNow lets guests extrapolate the small remaining gap
- * from velocity in the same host-clock domain the rest of the protocol uses. */
+/** Host -> all: every player's position and cursor (charge) radius, plus the live eraser swarm,
+ * broadcast every tick (30Hz) — decoupled from the much heavier, throttled (~10Hz) SnapshotPayload
+ * so remote movement/charging isn't stuck jumping between ~100ms-stale values. All small (a
+ * handful of tiny entries), so the extra message volume is cheap. cursorRadius in particular used
+ * to only ride along in the throttled snapshot — charging grows it continuously and firing snaps
+ * it back to MIN_RADIUS, so a remote player's cursor visibly jumped in size in ~100ms chunks right
+ * around exactly the moments (charging, firing) most likely to draw attention to it. Erasers
+ * aren't purely time-computable like the sweep brush (their heading changes randomly and bounces
+ * off walls), so they still need this fresher raw sync rather than a formula — hostNow lets guests
+ * extrapolate the small remaining gap from velocity in the same host-clock domain the rest of the
+ * protocol uses. */
 export interface PositionsPayload {
   hostNow: number;
-  positions: Array<{ id: number; x: number; y: number }>;
+  positions: Array<{ id: number; x: number; y: number; cursorRadius: number }>;
   erasers: Eraser[];
 }

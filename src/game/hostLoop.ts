@@ -103,12 +103,12 @@ export class HostGameLoop {
       this.pendingPaint = [];
     }
 
-    // Positions and erasers also go out every tick, same reasoning as paint above — both were
-    // stuck interpolating/extrapolating across the throttled snapshot's ~100ms gap, which read as
-    // laggy for guests.
+    // Positions (+ cursor radius) and erasers also go out every tick, same reasoning as paint
+    // above — all three were stuck interpolating/extrapolating/snapping across the throttled
+    // snapshot's ~100ms gap, which read as laggy for guests.
     this.client.broadcastPositions({
       hostNow: now,
-      positions: this.session.players.map((p) => ({ id: p.id, x: p.x, y: p.y })),
+      positions: this.session.players.map((p) => ({ id: p.id, x: p.x, y: p.y, cursorRadius: p.cursorRadius })),
       erasers: this.session.erasers,
     });
 

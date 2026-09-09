@@ -145,7 +145,7 @@ export function initOnlineUI(): void {
         onlineMode.clockOffset =
           onlineMode.clockOffset === undefined ? offsetSample : onlineMode.clockOffset * 0.8 + offsetSample * 0.2;
 
-        applyPositions(onlineMode.session, payload);
+        applyPositions(onlineMode.session, payload, onlineMode.mySlot);
         if (!onlineMode.interpolator) return;
         const now = onlineNow();
         for (const p of payload.positions) {
