@@ -67,34 +67,51 @@ export function playSplat(): void {
   tone(90, 0, 0.12, "sine", 0.3);
 }
 
-/** A full-charge Big Shot landing — a bigger, deeper boom than a regular splat: a longer/louder
- * noise burst under a low sub-bass thump. */
+/** A full-charge Big Shot landing — three layers for a bigger, more dramatic explosion than a
+ * regular splat: a sharp crack transient for attack/punch, a long noise burst for the body, and a
+ * deep sub-bass thump with a pitch drop underneath for weight. */
 export function playKaboom(): void {
   const c = getCtx();
   if (!master) return;
+
+  // Sharp crack right at the very start — the percussive "hit" that gives it punch.
+  const crack = c.createBufferSource();
+  crack.buffer = getNoiseBuffer(c);
+  const crackFilter = c.createBiquadFilter();
+  crackFilter.type = "highpass";
+  crackFilter.frequency.value = 2500;
+  const crackGain = c.createGain();
+  crackGain.gain.setValueAtTime(0.75, c.currentTime);
+  crackGain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.05);
+  crack.connect(crackFilter).connect(crackGain).connect(master);
+  crack.start();
+  crack.stop(c.currentTime + 0.06);
+
+  // The body of the explosion — a longer, deeper-sweeping noise burst than before.
   const src = c.createBufferSource();
   src.buffer = getNoiseBuffer(c);
   const filter = c.createBiquadFilter();
   filter.type = "lowpass";
-  filter.frequency.setValueAtTime(1800, c.currentTime);
-  filter.frequency.exponentialRampToValueAtTime(90, c.currentTime + 0.35);
+  filter.frequency.setValueAtTime(2200, c.currentTime);
+  filter.frequency.exponentialRampToValueAtTime(80, c.currentTime + 0.5);
   const gain = c.createGain();
-  gain.gain.setValueAtTime(0.805, c.currentTime); // was 0.7 — +15%
-  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.4);
+  gain.gain.setValueAtTime(0.966, c.currentTime); // was 0.805 — +20% more
+  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.55);
   src.connect(filter).connect(gain).connect(master);
   src.start();
-  src.stop(c.currentTime + 0.42);
+  src.stop(c.currentTime + 0.57);
 
+  // Deep sub-bass thump, dropping further and lingering longer for extra weight.
   const boom = c.createOscillator();
   const boomGain = c.createGain();
   boom.type = "sine";
-  boom.frequency.setValueAtTime(140, c.currentTime);
-  boom.frequency.exponentialRampToValueAtTime(35, c.currentTime + 0.4);
-  boomGain.gain.setValueAtTime(0.69, c.currentTime); // was 0.6 — +15%
-  boomGain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.45);
+  boom.frequency.setValueAtTime(160, c.currentTime);
+  boom.frequency.exponentialRampToValueAtTime(28, c.currentTime + 0.55);
+  boomGain.gain.setValueAtTime(0.828, c.currentTime); // was 0.69 — +20% more
+  boomGain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.6);
   boom.connect(boomGain).connect(master);
   boom.start();
-  boom.stop(c.currentTime + 0.47);
+  boom.stop(c.currentTime + 0.62);
 }
 
 export function playClaim(): void {
@@ -126,7 +143,7 @@ export function playPointReveal(rank: 0 | 1 | 2): void {
 
 /** Short countdown tick — plays once per second in the closing seconds of a round. */
 export function playTick(): void {
-  tone(1500, 0, 0.06, "square", 0.22);
+  tone(1500, 0, 0.06, "square", 0.308); // was 0.22 — +40%
 }
 
 export function playCurtain(): void {
@@ -227,6 +244,7 @@ let musicTimer: ReturnType<typeof setTimeout> | null = null;
 let musicStep = 0;
 let urgent = false;
 let tempoMultiplier = 1;
+let pitchMultiplier = 1;
 let musicVolumeMul = 1;
 
 function kick(offset: number, volumeMul = 1): void {
@@ -263,8 +281,9 @@ function snareHit(offset: number, volumeMul = 1): void {
 }
 
 function scheduleNext(): void {
-  // Tempo only changes between rounds (tempoMultiplier) — "urgent" adds percussion flavor in the
-  // closing seconds of a round (see playStep) but must never speed up playback mid-round.
+  // Tempo normally only changes between rounds, via setTempoMultiplier — the one exception is the
+  // finale's escalating panic effect (setPitchMultiplier/setTempoMultiplier called mid-round, see
+  // GameSession's finale intensity ramp), which reads its new rate on this timer's very next tick.
   musicTimer = setTimeout(playStep, BASE_STEP_MS / tempoMultiplier);
 }
 
@@ -272,7 +291,7 @@ function playStep(): void {
   const beat = musicStep % 4;
   const chord = CHORDS[Math.floor(musicStep / 4) % CHORDS.length]!;
   const semitone = chord[ARP_PATTERN[beat]!]!;
-  const freq = SCALE_ROOT * 2 ** (semitone / 12);
+  const freq = SCALE_ROOT * pitchMultiplier * 2 ** (semitone / 12);
 
   tone(freq, 0, urgent ? 0.15 : 0.2, "square", 0.085 * musicVolumeMul);
   if (beat === 0) {
@@ -306,6 +325,12 @@ export function setUrgent(value: boolean): void {
 /** Scales the loop's tempo (1 = normal, 1.05 = 5% faster, ...) without restarting it. */
 export function setTempoMultiplier(value: number): void {
   tempoMultiplier = value;
+}
+
+/** Scales the loop's pitch (1 = normal, 1.05 = 5% higher, ...) — independent of tempo, but the
+ * finale's panic ramp always sets both together for a "speeding up" rather than just "faster". */
+export function setPitchMultiplier(value: number): void {
+  pitchMultiplier = value;
 }
 
 /** Volume for the synthesized music loop only (0-1) — doesn't affect SFX like splats/claims. */

@@ -7,12 +7,16 @@
 
 import * as audio from "./audio.ts";
 import { loadCustomAudio, type CustomAudioSet } from "./customAudio.ts";
+import { FINALE_INTENSITY_STEP } from "./constants.ts";
 
 // music/start/finish are 22% quieter than their original levels (0.35/0.5/0.5); start/finish/
 // victory are then a further 10% quieter still (0.351/0.351/0.45).
 const DEFAULT_VOLUME = { music: 0.273, start: 0.351, finish: 0.351, victory: 0.45, drumroll: 0.55 };
 
 let custom: CustomAudioSet = { music: null, start: null, finish: null, victory: null, drumroll: null };
+/** The current round's own tempo multiplier (1.08 ** roundIndex) — the finale's intensity ramp
+ * compounds on top of this rather than replacing it. */
+let roundSpeedMultiplier = 1;
 let musicStarted = false;
 
 export function init(): void {
@@ -67,13 +71,34 @@ export function startMusic(): void {
 }
 
 /**
- * Call once per round (0-indexed) — each round is 8% faster than the last, compounding. This is
- * the ONLY thing that changes music tempo; nothing speeds it up mid-round.
+ * Call once per round (0-indexed) — each round is 8% faster than the last, compounding. Pitch is
+ * always reset to normal here (only the finale's escalating panic ramp below ever touches it), so
+ * every new round starts from a clean baseline even after a previous finale ramped pitch up.
  */
 export function setRoundSpeed(roundIndex: number): void {
   const multiplier = 1.08 ** roundIndex;
-  if (custom.music) custom.music.playbackRate = multiplier;
-  else audio.setTempoMultiplier(multiplier);
+  roundSpeedMultiplier = multiplier;
+  if (custom.music) {
+    custom.music.preservesPitch = true;
+    custom.music.playbackRate = multiplier;
+  } else {
+    audio.setTempoMultiplier(multiplier);
+    audio.setPitchMultiplier(1);
+  }
+}
+
+/** Finale-only: called every FINALE_INTENSITY_INTERVAL_MS with an incrementing level — ramps
+ * tempo AND pitch together on top of the round's own baseline speed (level 0 == baseline, no
+ * pitch shift yet), for a "speeding up" panic effect as the last round wears on. */
+export function setFinaleIntensity(level: number): void {
+  const multiplier = roundSpeedMultiplier * FINALE_INTENSITY_STEP ** level;
+  if (custom.music) {
+    custom.music.preservesPitch = false;
+    custom.music.playbackRate = multiplier;
+  } else {
+    audio.setTempoMultiplier(multiplier);
+    audio.setPitchMultiplier(multiplier);
+  }
 }
 
 function playFinishCue(): void {

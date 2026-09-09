@@ -14,6 +14,7 @@ import {
   ERASER_SPLIT_SPEED_MULT,
   FINAL_BURST_AT_MS,
   FINAL_BURST_COUNT,
+  FINALE_INTENSITY_INTERVAL_MS,
   GUN_BASE_Y,
   GUN_LENGTH,
   gunStationX,
@@ -81,6 +82,9 @@ export interface SoundHooks {
   playKaboom(): void;
   playClaim(): void;
   setRoundSpeed(roundIndex: number): void;
+  /** Finale-only: level increments every FINALE_INTENSITY_INTERVAL_MS spent playing that round —
+   * ramps tempo and pitch together on top of the round's own baseline speed. */
+  setFinaleIntensity(level: number): void;
   playCurtain(): void;
   roundEnd(): void;
   finalRoundEnd(): void;
@@ -105,6 +109,7 @@ const noopSound: SoundHooks = {
   playKaboom() {},
   playClaim() {},
   setRoundSpeed() {},
+  setFinaleIntensity() {},
   playCurtain() {},
   roundEnd() {},
   finalRoundEnd() {},
@@ -246,6 +251,9 @@ export class GameSession {
   private victoryRevealed = false;
   /** Whether the curtain-opening swish has already fired this ROUND_INTRO. */
   private curtainSoundPlayed = false;
+  /** Finale-only: how many FINALE_INTENSITY_INTERVAL_MS steps of the panic ramp have fired so far
+   * this round — see updatePlaying(). */
+  private finaleIntensityLevel = 0;
   /** Raw "is any paint key currently held" from last frame — used to edge-detect a fresh press
    * for menu-style state advances (see update()), independent of Player.wasPaintHeld's per-player
    * charge/release tracking used during PLAYING. */
@@ -365,6 +373,7 @@ export class GameSession {
     this.state = "ROUND_INTRO";
     this.stateEnteredAt = now;
     this.curtainSoundPlayed = false;
+    this.finaleIntensityLevel = 0;
     this.sound.setUrgent(false);
     this.sound.setRoundSpeed(index);
   }
@@ -374,6 +383,16 @@ export class GameSession {
     // so it actually registers before anyone can react. Paint charging still works; only movement
     // is held back, and only for the movement/clamp step inside updatePlayer.
     const moveLocked = now - this.stateEnteredAt < MOVE_LOCK_MS;
+
+    // Finale-only panic ramp: every FINALE_INTENSITY_INTERVAL_MS spent actually playing the last
+    // round, the music gets another notch faster and higher-pitched on top of its normal baseline.
+    if (this.roundIndex === ROUNDS.length - 1) {
+      const level = Math.floor((now - this.stateEnteredAt) / FINALE_INTENSITY_INTERVAL_MS);
+      if (level !== this.finaleIntensityLevel) {
+        this.finaleIntensityLevel = level;
+        this.sound.setFinaleIntensity(level);
+      }
+    }
     for (const player of this.players) {
       const keys = PLAYER_KEYS[player.id]!;
       const playerInput = input.getInput(keys);

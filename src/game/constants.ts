@@ -55,7 +55,7 @@ export const GROW_RATE = 60; // px/sec while paint held (charging)
 export const MOVE_SPEED = 338; // px/sec (30% faster than the original 260)
 // Cursors are frozen for this long once a round actually starts, so the "START!" flash has time
 // to register before anyone can react — paint charging still works during this window.
-export const MOVE_LOCK_MS = 250;
+export const MOVE_LOCK_MS = 1000; // was 250 — +750ms more
 
 export const SPLAT_INTERVAL_MS = 60; // machine-gun auto-fire cadence
 // A very slight cap on manual release-to-fire spamming — still ~7 shots/sec at the limit, clearly
@@ -75,6 +75,12 @@ export const POWERUP_TOP_CLEARANCE = 100;
 // of machine-gun power-ups all at once, outside the normal paced/random spawn budget.
 export const FINAL_BURST_AT_MS = 10000;
 export const FINAL_BURST_COUNT = 4;
+
+// The finale's music gets both faster AND higher-pitched every FINALE_INTENSITY_INTERVAL_MS spent
+// actually playing that round (compounding, on top of the round's normal per-round tempo bump) —
+// a rising "vinyl speeding up" panic effect exclusive to the last round.
+export const FINALE_INTENSITY_INTERVAL_MS = 5000;
+export const FINALE_INTENSITY_STEP = 1.05;
 
 export const SHRINK_MULTIPLIER = 0.4;
 export const SHRINK_DURATION_MS = 6000;
