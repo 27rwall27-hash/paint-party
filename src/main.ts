@@ -1,6 +1,9 @@
 import "./style.css";
 import { GameSession } from "./game/GameSession.ts";
 import { InputManager } from "./game/Input.ts";
+import { CompositeInputSource } from "./game/compositeInputSource.ts";
+import { CpuController } from "./game/cpuController.ts";
+import { fillWithBots } from "./game/Player.ts";
 import { render } from "./game/render.ts";
 import * as sound from "./game/sound.ts";
 import { initOnlineUI } from "./game/onlineUI.ts";
@@ -11,8 +14,8 @@ import { MOVE_LOCK_MS, PLAYER_DEFS } from "./game/constants.ts";
 import type { PlayerInputState } from "./game/Input.ts";
 
 sound.init();
-initModeToggleUI();
-initOnlineUI();
+const onlineUIHandle = initOnlineUI();
+initModeToggleUI(onlineUIHandle);
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
 const ctx = canvas.getContext("2d")!;
@@ -20,10 +23,15 @@ const NEUTRAL_INPUT: PlayerInputState = { up: false, down: false, left: false, r
 
 const input = new InputManager();
 const session = new GameSession(sound);
-// Local play is solo-only now — session.players stays a fixed 4-slot array (see Player.active),
-// but only slot 0 is ever active locally; the other 3 sit unrendered/unscored.
+// Local play is solo-only now — session.players stays a fixed 4-slot array (see Player.active).
+// Slot 0 is the human; the rest are CPU bots, filled in immediately (no lobby to wait on locally)
+// so there are always 4 in the game, matching online.
 session.players.forEach((p, i) => (p.active = i === 0));
+fillWithBots(session.players);
 initPlayerSetupUI(session);
+
+const localCpu = new CpuController();
+const localInputSource = new CompositeInputSource(input, localCpu);
 
 let lastTime = performance.now();
 
@@ -86,7 +94,8 @@ function loop(time: number): void {
 
     render(ctx, onlineMode.session, now);
   } else {
-    session.update(dt, time, input);
+    localCpu.update(session, time);
+    session.update(dt, time, localInputSource);
     render(ctx, session, time);
   }
 

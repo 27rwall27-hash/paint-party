@@ -8,6 +8,7 @@ import {
   MIN_RADIUS,
   MOVE_SPEED,
   PLAYER_DEFS,
+  PRESET_COLORS,
 } from "./constants.ts";
 import type { PlayerInputState } from "./Input.ts";
 
@@ -39,6 +40,9 @@ export interface Player {
    * the host while the session is in "MENU"; locked for the rest of a match once it starts, so a
    * mid-match disconnect freezes a player in place rather than removing them. */
   active: boolean;
+  /** True for a CPU-controlled seat — CompositeInputSource feeds it CpuController's computed
+   * input instead of real/reported input. Only ever set by fillWithBots(). */
+  isBot: boolean;
 }
 
 const START_POSITIONS: Array<[number, number]> = [
@@ -68,6 +72,7 @@ export function createPlayers(): Player[] {
       confusedAngle: 0,
       confusedAngleSetAt: 0,
       active: true,
+      isBot: false,
     };
   });
 }
@@ -77,6 +82,30 @@ export function createPlayers(): Player[] {
  * for why the array itself never shrinks/reorders. */
 export function activePlayers(players: Player[]): Player[] {
   return players.filter((p) => p.active);
+}
+
+/** Fills every still-empty slot with a CPU bot — "there should always be 4 in a room." Picks a
+ * name/color that doesn't collide with anyone already active, same rule real players follow.
+ * Local calls this once, immediately (slots 1-3 are bots from the start, no lobby to wait on).
+ * Online calls this right before a match actually starts, so any slot a real guest didn't claim
+ * in time gets backfilled instead of leaving the room short-handed. */
+export function fillWithBots(players: Player[]): void {
+  const usedColors = new Set(players.filter((p) => p.active).map((p) => p.color.toLowerCase()));
+  const usedNames = new Set(players.filter((p) => p.active).map((p) => p.name.toLowerCase()));
+  const availableColors = PRESET_COLORS.filter((c) => !usedColors.has(c.toLowerCase()));
+  let colorCursor = 0;
+  players.forEach((p, slot) => {
+    if (p.active) return;
+    let name = `CPU ${slot + 1}`;
+    while (usedNames.has(name.toLowerCase())) name = `${name}*`;
+    usedNames.add(name.toLowerCase());
+    const color = availableColors[colorCursor++] ?? PRESET_COLORS[slot % PRESET_COLORS.length]!;
+    usedColors.add(color.toLowerCase());
+    p.name = name;
+    p.color = color;
+    p.active = true;
+    p.isBot = true;
+  });
 }
 
 export function resetForRound(players: Player[]): void {

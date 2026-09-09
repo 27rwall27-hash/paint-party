@@ -201,21 +201,21 @@ body {
   box-shadow: 0 0 0 2px #241f29, 0 0 0 4px #ffd60a;
 }
 
+.colorPicker.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+#online input:disabled,
+#localPanel input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 #onlineRoomControls {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid #453e4e;
-}
-
-#onlineRename {
-  margin-top: 8px;
-}
-
-#renameStatus {
-  font-size: 13px;
-  font-weight: 600;
-  color: #ff8a8a;
-  margin: 4px 0 0;
 }
 
 .settingsRow {

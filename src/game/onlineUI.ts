@@ -6,15 +6,24 @@ import { PredictedPlayer } from "./predictedPlayer.ts";
 import { RemoteInterpolator } from "./interpolation.ts";
 import { resetGuestSound, syncGuestSound } from "./guestSound.ts";
 import { renderColorPicker } from "./colorPicker.ts";
+import { fillWithBots } from "./Player.ts";
 import * as sound from "./sound.ts";
 import type { PresencePayload } from "./netProtocol.ts";
 
 const DEFAULT_COLOR = "#e63946";
 
-export function initOnlineUI(): void {
+export interface OnlineUIHandle {
+  /** Leaves the current room (if any) and resets the online panel back to its pre-join state.
+   * Used by the mode toggle when switching away to Local, so a forgotten online session can't
+   * keep driving the game loop behind the scenes while the Local panel is showing. */
+  leaveIfActive(): void;
+}
+
+export function initOnlineUI(): OnlineUIHandle | undefined {
   const createBtn = document.querySelector<HTMLButtonElement>("#onlineCreateBtn");
   const joinBtn = document.querySelector<HTMLButtonElement>("#onlineJoinBtn");
   const joinCodeInput = document.querySelector<HTMLInputElement>("#onlineJoinCode");
+  const joinControls = document.querySelector<HTMLElement>("#onlineJoinControls");
   const nameInput = document.querySelector<HTMLInputElement>("#onlineNameInput");
   const colorPickerEl = document.querySelector<HTMLElement>("#onlineColorPicker");
   const startBtn = document.querySelector<HTMLButtonElement>("#onlineStartBtn");
@@ -22,53 +31,87 @@ export function initOnlineUI(): void {
   const roomControls = document.querySelector<HTMLElement>("#onlineRoomControls");
   const status = document.querySelector<HTMLElement>("#onlineStatus");
   const playerList = document.querySelector<HTMLUListElement>("#onlinePlayerList");
-  const renameNameInput = document.querySelector<HTMLInputElement>("#renameNameInput");
-  const renameColorPickerEl = document.querySelector<HTMLElement>("#renameColorPicker");
-  const renameApplyBtn = document.querySelector<HTMLButtonElement>("#renameApplyBtn");
-  const renameStatus = document.querySelector<HTMLElement>("#renameStatus");
   if (
     !createBtn ||
     !joinBtn ||
     !joinCodeInput ||
+    !joinControls ||
     !nameInput ||
     !colorPickerEl ||
     !startBtn ||
     !leaveBtn ||
     !roomControls ||
     !status ||
-    !playerList ||
-    !renameNameInput ||
-    !renameColorPickerEl ||
-    !renameApplyBtn ||
-    !renameStatus
+    !playerList
   ) {
-    return;
+    return undefined;
   }
   const statusEl = status;
   const playerListEl = playerList;
   const startBtnEl = startBtn;
   const leaveBtnEl = leaveBtn;
   const roomControlsEl = roomControls;
+  const joinControlsEl = joinControls;
   const nameInputEl = nameInput;
-  const renameNameInputEl = renameNameInput;
-  const renameStatusEl = renameStatus;
+  const colorPickerElBound = colorPickerEl; // rebound so nested functions below see it as non-null
 
   let client: NetworkClient | undefined;
   let hostLoop: HostGameLoop | undefined;
+  let editabilityPollTimer: ReturnType<typeof setInterval> | undefined;
   let myColor = DEFAULT_COLOR;
-  let renameColor = DEFAULT_COLOR;
+  let roomCode = "";
 
-  const paintJoinColor = (color: string) => {
+  // Name/color live in ONE place (this input + picker), used both to pick them before
+  // creating/joining a room AND to change them afterward, while still in the lobby — see
+  // applyNameColor below for the "afterward" half. Before joining, changing them just updates the
+  // local vars used by the next Create/Join click.
+  const paintColor = (color: string) => {
     myColor = color;
-    renderColorPicker(colorPickerEl, myColor, paintJoinColor);
+    renderColorPicker(colorPickerElBound, myColor, paintColor);
+    if (isSeated()) applyNameColor(currentName(), color);
   };
-  renderColorPicker(colorPickerEl, myColor, paintJoinColor);
+  renderColorPicker(colorPickerElBound, myColor, paintColor);
 
-  const paintRenameColor = (color: string) => {
-    renameColor = color;
-    renderColorPicker(renameColorPickerEl, renameColor, paintRenameColor);
-  };
-  renderColorPicker(renameColorPickerEl, renameColor, paintRenameColor);
+  nameInputEl.addEventListener("change", () => {
+    if (isSeated()) applyNameColor(currentName(), myColor);
+  });
+
+  function currentName(): string {
+    return nameInputEl.value.trim() || "Player";
+  }
+
+  function isSeated(): boolean {
+    return client !== undefined && onlineMode.active && onlineMode.mySlot !== undefined;
+  }
+
+  // Once a match has actually started, name/color are locked for the rest of it (same rule as
+  // Player.active — see its comment) — both so the input can't send a request the host would just
+  // reject, and so it's visibly obvious you can't change it mid-game rather than silently failing.
+  function midMatch(): boolean {
+    return onlineMode.active && onlineMode.session !== undefined && onlineMode.session.state !== "MENU";
+  }
+
+  function updateEditability(): void {
+    const locked = isSeated() && midMatch();
+    nameInputEl.disabled = locked;
+    colorPickerElBound.classList.toggle("disabled", locked);
+  }
+
+  function applyNameColor(name: string, color: string): void {
+    if (!client) return;
+    if (onlineMode.role === "host") {
+      // No round trip needed — the host already owns the authoritative player record directly.
+      const rejection = hostAuthority.reserveNameColor(0, name, color);
+      if (rejection) {
+        statusEl.textContent = rejection;
+        return;
+      }
+      client.updateOwnPresence(name, color);
+      statusEl.textContent = `Room ${roomCode} — you're ${name}. Share the code with friends.`;
+    } else {
+      client.requestRename(name, color);
+    }
+  }
 
   // Host-only authority NetworkClient calls into for join/rename decisions — kept here (not
   // inside NetworkClient) so the actual GameSession/roster stays owned by this module; NetworkClient
@@ -101,6 +144,7 @@ export function initOnlineUI(): void {
     },
     reserveNameColor: (slot, name, color) => {
       if (!hostLoop) return "Room isn't ready yet.";
+      if (hostLoop.session.state !== "MENU") return "Can't change name/color once a match has started.";
       const trimmed = (name.trim() || `P${slot + 1}`).slice(0, 12);
       if (nameOrColorConflicts(slot, trimmed, color)) return "That name or color is already taken in this room.";
       const player = hostLoop.session.players[slot];
@@ -148,9 +192,14 @@ export function initOnlineUI(): void {
         if (p.color) player.color = p.color;
       }
     }
+    updateEditability();
   }
 
   function resetToStartScreen(message: string): void {
+    if (editabilityPollTimer !== undefined) {
+      clearInterval(editabilityPollTimer);
+      editabilityPollTimer = undefined;
+    }
     client = undefined;
     hostLoop = undefined;
     onlineMode.active = false;
@@ -165,8 +214,10 @@ export function initOnlineUI(): void {
     onlineMode.connectionStatus = undefined;
     roomControlsEl.hidden = true;
     startBtnEl.hidden = true;
+    joinControlsEl.hidden = false;
     playerListEl.innerHTML = "";
     statusEl.textContent = message;
+    updateEditability();
   }
 
   function beginGuestSession(): void {
@@ -178,7 +229,9 @@ export function initOnlineUI(): void {
     onlineMode.active = true;
     onlineMode.connectionStatus = "connected";
     resetGuestSound();
+    joinControlsEl.hidden = true;
     roomControlsEl.hidden = false;
+    updateEditability();
   }
 
   function beginHostSession(c: NetworkClient): void {
@@ -189,11 +242,18 @@ export function initOnlineUI(): void {
     onlineMode.active = true;
     onlineMode.connectionStatus = "connected";
     startBtnEl.hidden = false;
+    joinControlsEl.hidden = true;
     roomControlsEl.hidden = false;
+    updateEditability();
+    // The host has no other event that fires once the match actually leaves MENU (a guest learns
+    // this from its own onSnapshot handler; the host, especially with no guests to trigger a
+    // presence sync, otherwise never re-checks) — a cheap poll is simpler than threading a new
+    // state-change callback through HostGameLoop for what's ultimately a cosmetic UI sync.
+    editabilityPollTimer = setInterval(updateEditability, 500);
   }
 
   createBtn.addEventListener("click", () => {
-    const myName = nameInputEl.value.trim() || "P1";
+    const myName = currentName();
     client?.leaveRoom(); // tear down any earlier attempt from this tab first — see joinBtn below
     statusEl.textContent = "Connecting…";
     try {
@@ -219,6 +279,7 @@ export function initOnlineUI(): void {
         else c.approveRename(clientId, name, color);
       });
       void c.createRoom(myName, myColor).then((code) => {
+        roomCode = code;
         statusEl.textContent = `Room ${code} — you're ${myName}. Share the code with friends.`;
         beginHostSession(c);
       });
@@ -230,7 +291,7 @@ export function initOnlineUI(): void {
   joinBtn.addEventListener("click", () => {
     const code = joinCodeInput.value.trim();
     if (!code) return;
-    const myName = nameInputEl.value.trim() || "Player";
+    const myName = currentName();
     // Guests never press a local "paint" key to unlock audio the way MENU->beginRound does for
     // host/local play (a guest's session never runs its own GameSession.update() — see
     // guestSound.ts) — this click is the one real user gesture in the whole join flow, so it's
@@ -249,19 +310,16 @@ export function initOnlineUI(): void {
       c.onPresenceSync(renderRoster);
       c.onConnectionStatus((s) => (onlineMode.connectionStatus = s));
       c.onSlotAssigned((slot) => {
-        statusEl.textContent = `Room ${code.toUpperCase()} — you're ${myName}.`;
+        roomCode = code.toUpperCase();
+        statusEl.textContent = `Room ${roomCode} — you're ${myName}.`;
         onlineMode.mySlot = slot;
         beginGuestSession();
       });
       c.onError((message) => {
-        // Before a slot is assigned this is a join rejection (room full, name/color taken);
-        // afterward it can only be a rejected rename request (see renameApplyBtn below) — the two
-        // never overlap since a rename can't be requested before being seated.
-        if (onlineMode.mySlot === undefined) statusEl.textContent = message;
-        else renameStatusEl.textContent = message;
+        statusEl.textContent = message;
       });
-      c.onRenameOk(() => {
-        renameStatusEl.textContent = "Updated!";
+      c.onRenameOk((name) => {
+        statusEl.textContent = `Room ${roomCode} — you're ${name}.`;
       });
       c.onRoomClosed((reason) => {
         resetToStartScreen(reason);
@@ -288,6 +346,7 @@ export function initOnlineUI(): void {
         // throttled snapshot — reset on a round change so a stale pre-round-change target doesn't
         // linger and get lerped toward for the first ~30ms of the new round.
         if (roundChanged) onlineMode.interpolator?.reset();
+        updateEditability();
       });
       c.onFast((payload) => {
         if (!onlineMode.session) return;
@@ -337,10 +396,15 @@ export function initOnlineUI(): void {
   });
 
   startBtnEl.addEventListener("click", () => {
-    hostLoop?.requestStart();
+    if (!hostLoop) return;
+    // "There should always be 4 in a room" — whichever slots no real guest claimed in time get
+    // backfilled with CPU bots right as the match actually begins, not any earlier (a human can
+    // still join and take a slot right up until this click).
+    fillWithBots(hostLoop.session.players);
+    hostLoop.requestStart();
   });
 
-  leaveBtnEl.addEventListener("click", () => {
+  function leaveRoom(): void {
     if (!client) return;
     if (onlineMode.role === "host") {
       // Confirmed decision: the host leaving ends the room for everyone — no host migration, the
@@ -350,23 +414,13 @@ export function initOnlineUI(): void {
     }
     client.leaveRoom();
     resetToStartScreen("");
-  });
+  }
 
-  renameApplyBtn.addEventListener("click", () => {
-    if (!client) return;
-    renameStatusEl.textContent = "";
-    const name = renameNameInputEl.value.trim() || "Player";
-    if (onlineMode.role === "host") {
-      // No round trip needed — the host already owns the authoritative player record directly.
-      const rejection = hostAuthority.reserveNameColor(0, name, renameColor);
-      if (rejection) {
-        renameStatusEl.textContent = rejection;
-        return;
-      }
-      client.updateOwnPresence(name, renameColor);
-      renameStatusEl.textContent = "Updated!";
-    } else {
-      client.requestRename(name, renameColor);
-    }
-  });
+  leaveBtnEl.addEventListener("click", leaveRoom);
+
+  return {
+    leaveIfActive: () => {
+      if (onlineMode.active) leaveRoom();
+    },
+  };
 }

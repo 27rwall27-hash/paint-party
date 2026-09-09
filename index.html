@@ -33,19 +33,24 @@
         <p class="settingsHint">
           Create a room and share the 4-letter code with friends, or enter a code someone shared
           with you. Everyone online plays with WASD to move and Space to paint, regardless of
-          which slot they're assigned.
+          which slot they're assigned. Your name/color can be changed any time before the match
+          starts — just pick again below.
         </p>
         <div class="settingsRow">
           <input id="onlineNameInput" type="text" placeholder="Your name" maxlength="12" />
         </div>
         <div id="onlineColorPicker"></div>
-        <div class="settingsRow">
-          <button id="onlineCreateBtn" type="button">Create Room</button>
+
+        <div id="onlineJoinControls">
+          <div class="settingsRow">
+            <button id="onlineCreateBtn" type="button">Create Room</button>
+          </div>
+          <div class="settingsRow">
+            <input id="onlineJoinCode" type="text" placeholder="Code" maxlength="4" />
+            <button id="onlineJoinBtn" type="button">Join</button>
+          </div>
         </div>
-        <div class="settingsRow">
-          <input id="onlineJoinCode" type="text" placeholder="Code" maxlength="4" />
-          <button id="onlineJoinBtn" type="button">Join</button>
-        </div>
+
         <p id="onlineStatus"></p>
         <ul id="onlinePlayerList"></ul>
 
@@ -54,17 +59,6 @@
             <button id="onlineStartBtn" type="button" hidden>Start Match</button>
             <button id="onlineLeaveBtn" type="button">Leave Room</button>
           </div>
-          <details id="onlineRename">
-            <summary>Change name/color</summary>
-            <div class="settingsRow">
-              <input id="renameNameInput" type="text" maxlength="12" placeholder="Your name" />
-            </div>
-            <div id="renameColorPicker"></div>
-            <div class="settingsRow">
-              <button id="renameApplyBtn" type="button">Apply</button>
-            </div>
-            <p id="renameStatus"></p>
-          </details>
         </div>
       </div>
     </div>
