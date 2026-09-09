@@ -1,10 +1,11 @@
 import {
   CANVAS_H,
   CANVAS_W,
+  GROUND_Y_FRACTION,
   HIT_LINE_FRACTION,
   JUMP_AIRTIME_MS,
   JUMP_ARC_HEIGHT_PX,
-  OBSTACLE_TOP_FRACTION,
+  OBSTACLE_SPAWN_FRACTION,
   POINTS_BY_RANK,
   RACER_COUNT,
   SINGLE_PHASE_MS,
@@ -54,17 +55,18 @@ function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number,
   ctx.fillStyle = "#241f29";
   ctx.fillRect(0, y, CANVAS_W, h);
 
-  // Simple scrolling stripes (vertical motion, matching the obstacles' own top-to-bottom travel)
-  // for a sense of forward motion.
-  const stripeH = 40;
-  const scrollSpeedPxPerSec = 70;
+  // Simple scrolling stripes — horizontal motion, matching the obstacles' own left-to-right-facing
+  // travel (same convention as the original endless-runner: the world scrolls past stationary
+  // runners) — for a sense of forward motion.
+  const stripeW = 46;
+  const scrollSpeedPxPerSec = 90;
   const offset = (now / 1000) * scrollSpeedPxPerSec;
   ctx.strokeStyle = "rgba(255,255,255,0.05)";
   ctx.lineWidth = 2;
-  for (let rowY = y - stripeH - (offset % stripeH); rowY < y + h; rowY += stripeH) {
+  for (let colX = -stripeW - (offset % stripeW); colX < CANVAS_W; colX += stripeW) {
     ctx.beginPath();
-    ctx.moveTo(0, rowY);
-    ctx.lineTo(CANVAS_W, rowY);
+    ctx.moveTo(colX, y);
+    ctx.lineTo(colX, y + h);
     ctx.stroke();
   }
 
@@ -75,15 +77,16 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   drawBandBackground(ctx, y, h, now);
 
   const colWidth = (CANVAS_W - COLUMN_GAP * (RACER_COUNT - 1)) / RACER_COUNT;
-  const hitLineY = y + h * HIT_LINE_FRACTION;
-  const obstacleTopY = y + h * OBSTACLE_TOP_FRACTION;
+  // One shared ground line for the whole band — every runner stands on it, every obstacle travels
+  // along it (horizontally, within its own column), and jumping is the only thing that moves a
+  // runner off of it, same convention as the original endless-runner this is modeled on.
+  const groundY = y + h * GROUND_Y_FRACTION;
   const radius = Math.min(colWidth * 0.28, 17);
 
-  // Ground line where racers stand.
   ctx.strokeStyle = "rgba(255,255,255,0.12)";
   ctx.beginPath();
-  ctx.moveTo(0, hitLineY + radius + 4);
-  ctx.lineTo(CANVAS_W, hitLineY + radius + 4);
+  ctx.moveTo(0, groundY + radius + 4);
+  ctx.lineTo(CANVAS_W, groundY + radius + 4);
   ctx.stroke();
 
   race.racers.forEach((racer, rank) => {
@@ -93,14 +96,18 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     // knocks that racer's column to the far left, matching "knocked off screen to the left,
     // rejoin the horizontal line at the back".
     const displaySlot = RACER_COUNT - 1 - rank;
-    const colCenterX = displaySlot * (colWidth + COLUMN_GAP) + colWidth / 2;
+    const colLeft = displaySlot * (colWidth + COLUMN_GAP);
+    const runnerX = colLeft + colWidth * HIT_LINE_FRACTION;
     const isHuman = identity.id === 0;
 
     if (racer.obstacle) {
+      // Slides in from the column's right edge toward the runner's own x — left-facing motion,
+      // same direction the original game's obstacles approach from.
       const progress = obstacleProgress(racer.obstacle, now);
-      const obstacleY = obstacleTopY + progress * (hitLineY - obstacleTopY);
+      const spawnX = colLeft + colWidth * OBSTACLE_SPAWN_FRACTION;
+      const obstacleX = spawnX + progress * (runnerX - spawnX);
       ctx.fillStyle = "#5c4a2e";
-      ctx.fillRect(colCenterX - colWidth * 0.32, obstacleY - 7, colWidth * 0.64, 14);
+      ctx.fillRect(obstacleX - 6, groundY - radius - 8, 12, radius + 12);
     }
 
     let jumpOffset = 0;
@@ -108,21 +115,22 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
       const t = Math.min(1, Math.max(0, (now - racer.jumpStartedAt) / JUMP_AIRTIME_MS));
       jumpOffset = -Math.sin(t * Math.PI) * JUMP_ARC_HEIGHT_PX;
     }
-    const runnerY = hitLineY + jumpOffset;
+    const runnerY = groundY + jumpOffset;
 
     if (isHuman) {
       ctx.beginPath();
-      ctx.arc(colCenterX, runnerY, radius + 4, 0, Math.PI * 2);
+      ctx.arc(runnerX, runnerY, radius + 4, 0, Math.PI * 2);
       ctx.strokeStyle = "#ffd60a";
       ctx.lineWidth = 2;
       ctx.stroke();
     }
 
     ctx.beginPath();
-    ctx.arc(colCenterX, runnerY, radius, 0, Math.PI * 2);
+    ctx.arc(runnerX, runnerY, radius, 0, Math.PI * 2);
     ctx.fillStyle = identity.color;
     ctx.fill();
 
+    const colCenterX = colLeft + colWidth / 2;
     ctx.fillStyle = "rgba(255,255,255,0.4)";
     ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
     ctx.textAlign = "center";
@@ -133,7 +141,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillText(identity.name, colCenterX, hitLineY + radius + 8);
+    ctx.fillText(identity.name, colCenterX, groundY + radius + 8);
   });
 }
 

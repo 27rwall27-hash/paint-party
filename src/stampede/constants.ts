@@ -63,12 +63,19 @@ export const PHASE_BASE_SPAWN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", num
 export const RACE_RAMP_SPAWN_FLOOR_MS = 750;
 export const SPAWN_INTERVAL_JITTER = 0.3;
 
-// Where a column's obstacle track sits, as a fraction of the column's own height — 0 = the very
-// top of the column, 1 = the very bottom. The hit-line (where racers stand, and where an obstacle
-// resolves) sits near the bottom; the obstacle "spawns" (progress 0) near the top. Fractions, not
-// pixels, so this scales automatically with column height too.
-export const OBSTACLE_TOP_FRACTION = 0.06;
-export const HIT_LINE_FRACTION = 0.86;
+// Ground level within a band — a fraction of the band's own height where every runner stands and
+// every obstacle travels, matching the classic endless-runner convention (the T-Rex game this is
+// modeled on): characters and obstacles share one ground line, obstacles move HORIZONTALLY along
+// it, and jumping is the only thing that moves a runner off it (briefly, vertically).
+export const GROUND_Y_FRACTION = 0.8;
+// Where a column's obstacle track sits, as a fraction of the COLUMN'S OWN WIDTH — 0 = the
+// column's left edge, 1 = its right edge. The hit-line (where the runner stands, and where an
+// obstacle resolves) sits near the left; the obstacle "spawns" (progress 0) near the right and
+// slides toward it — same left-to-right-facing motion as the original game, just miniaturized to
+// fit inside one racer's own ~150px-wide column instead of the full screen. Fractions, not
+// pixels, so this scales automatically with column width too.
+export const OBSTACLE_SPAWN_FRACTION = 0.94;
+export const HIT_LINE_FRACTION = 0.24;
 
 // Per-identity base jump-success chance, randomized once at game start within this range — most
 // CPUs usually clear a jump but occasionally fail, giving the human a real chance without making
