@@ -48,6 +48,22 @@ export class Outline {
   readonly paintCtx: CanvasRenderingContext2D;
   /** Total pixel count inside the shape's actual path (not just its bounding box) — the scoring denominator. */
   readonly areaPixels: number;
+  /** bbox-local (same indexing as bbox pixel scans elsewhere: `(ly * bbox.w + lx)`), 1 where the
+   * shape's real path covers that pixel, 0 otherwise — for a thin/irregular silhouette (the Eiffel
+   * Tower, the Statue of Liberty) most of the bounding box/circle is 0: real empty air the shape
+   * doesn't cover at all, as opposed to unpainted space that's still part of the shape. Computed
+   * once at construction (see computeShapeMask) so containsPoint() and anything else that needs
+   * real shape membership is a cheap array lookup, not a fresh path hit-test or canvas read. */
+  readonly shapeMask: Uint8Array;
+  /** One point (world/canvas coordinates) guaranteed to satisfy containsPoint() — the shape's own
+   * mask centroid if that itself lands inside the shape (true for anything reasonably convex),
+   * otherwise the first mask pixel found (always inside, by construction). Exists as a guaranteed-
+   * good last resort for aim-point rejection sampling (see cpuController.ts's jitterAimInside):
+   * for an extremely thin silhouette (the real Eiffel Tower artwork occupies well under 10% of its
+   * own bounding box) even a generous retry budget can occasionally exhaust without finding a hit,
+   * and a fallback that isn't itself guaranteed on-shape would just trade one rare miss for
+   * another. */
+  readonly fallbackPoint: { x: number; y: number };
 
   constructor(spec: OutlineSpec) {
     this.kind = spec.kind;
@@ -79,29 +95,70 @@ export class Outline {
     if (!ctx) throw new Error("2d context unavailable");
     this.paintCtx = ctx;
 
-    this.areaPixels = this.computeAreaPixels();
+    this.shapeMask = this.computeShapeMask();
+    let count = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let firstX = -1;
+    let firstY = -1;
+    for (let py = 0; py < this.bbox.h; py++) {
+      for (let px = 0; px < this.bbox.w; px++) {
+        if (this.shapeMask[py * this.bbox.w + px]! === 0) continue;
+        count++;
+        sumX += px;
+        sumY += py;
+        if (firstX === -1) {
+          firstX = px;
+          firstY = py;
+        }
+      }
+    }
+    this.areaPixels = Math.max(1, count);
+    if (count === 0) {
+      this.fallbackPoint = { x: this.cx, y: this.cy };
+    } else {
+      const centroidX = Math.round(sumX / count);
+      const centroidY = Math.round(sumY / count);
+      const onMask = this.shapeMask[centroidY * this.bbox.w + centroidX] === 1;
+      const px = onMask ? centroidX : firstX;
+      const py = onMask ? centroidY : firstY;
+      this.fallbackPoint = { x: this.bbox.x + px, y: this.bbox.y + py };
+    }
   }
 
-  private computeAreaPixels(): number {
+  private computeShapeMask(): Uint8Array {
+    const mask = new Uint8Array(this.bbox.w * this.bbox.h);
     const maskCanvas = document.createElement("canvas");
     maskCanvas.width = this.bbox.w;
     maskCanvas.height = this.bbox.h;
     const ctx = maskCanvas.getContext("2d");
-    if (!ctx) return 1;
+    if (!ctx) return mask;
     ctx.translate(-this.bbox.x, -this.bbox.y);
     ctx.fillStyle = "#000";
     ctx.fill(this.path);
     const data = ctx.getImageData(0, 0, this.bbox.w, this.bbox.h).data;
-    let count = 0;
-    for (let i = 3; i < data.length; i += 4) {
-      if (data[i]! > 0) count++;
+    for (let i = 3, p = 0; i < data.length; i += 4, p++) {
+      if (data[i]! > 0) mask[p] = 1;
     }
-    return Math.max(1, count);
+    return mask;
   }
 
   /** True if a splat centered at (x,y) with the given radius could touch this outline at all. */
   mayOverlap(x: number, y: number, splatRadius: number): boolean {
     return Math.hypot(x - this.cx, y - this.cy) <= this.boundingRadius + splatRadius;
+  }
+
+  /** True if (x, y) — in the same world/canvas coordinates as cx/cy — actually lies inside this
+   * outline's real shape, not just its bounding circle/box. For a thin or irregular silhouette
+   * (the Eiffel Tower's narrow lattice, the Statue of Liberty's slender figure) the bounding circle
+   * is mostly empty air the shape doesn't occupy at all — a point can pass mayOverlap() and still
+   * be nowhere near paintable ground, since paintSplat() clips all painting to `path` and a splat
+   * centered there would land zero visible pixels. */
+  containsPoint(x: number, y: number): boolean {
+    const lx = Math.floor(x - this.bbox.x);
+    const ly = Math.floor(y - this.bbox.y);
+    if (lx < 0 || ly < 0 || lx >= this.bbox.w || ly >= this.bbox.h) return false;
+    return this.shapeMask[ly * this.bbox.w + lx] === 1;
   }
 
   /** Paints the main blob plus a scatter of smaller satellite droplets for an explosive impact. */

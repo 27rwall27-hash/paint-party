@@ -60,6 +60,10 @@ const ALREADY_DOMINANT_PENALTY = 6000;
 // timer so a spraying bot keeps sweeping across real ground (and can bail out of an already-full
 // outline) instead of converging on one point and parking there for the whole power-up duration.
 const MACHINEGUN_REFRESH_MS = 350;
+// Minimum charge fraction the Confusion power-up's opportunistic fire (see decide()) will settle
+// for — without a floor here, a bot whose random drift carries it off an outline moments after
+// starting to charge would release immediately, landing a nearly-worthless sliver of a splat.
+const CONFUSION_MIN_FIRE_FRAC = 0.5;
 
 const NEUTRAL: PlayerInputState = { up: false, down: false, left: false, right: false, paint: false };
 
@@ -110,6 +114,31 @@ function jitterAim(cx: number, cy: number, radius: number): { x: number; y: numb
   const angle = Math.random() * Math.PI * 2;
   const dist = radius * AIM_JITTER_FRACTION * Math.sqrt(Math.random());
   return { x: cx + Math.cos(angle) * dist, y: cy + Math.sin(angle) * dist };
+}
+
+// How many times to resample before giving up and falling back to the outline's own authored
+// center — see jitterAimInside.
+const MAX_INSIDE_AIM_ATTEMPTS = 20;
+
+/** Same distribution as jitterAim, but rejection-sampled against the outline's REAL shape
+ * (Outline.containsPoint), not just its bounding circle. For a simple, roughly-convex shape
+ * (circle, rectangle, star) the bounding circle IS close to the real shape and this almost always
+ * succeeds on the first try. For a thin or irregular silhouette (the Eiffel Tower's narrow
+ * lattice, the Statue of Liberty's slender figure) most of the bounding circle is real empty air
+ * the shape doesn't occupy at all — without this, a bot can walk to and fire at a perfectly
+ * reasonable-looking jittered point that's nowhere near paintable ground, landing zero visible
+ * paint (paintSplat clips everything to the real path) — a complete miss. */
+function jitterAimInside(outline: Outline, cx: number, cy: number, radius: number): { x: number; y: number } {
+  for (let i = 0; i < MAX_INSIDE_AIM_ATTEMPTS; i++) {
+    const candidate = jitterAim(cx, cy, radius);
+    if (outline.containsPoint(candidate.x, candidate.y)) return candidate;
+  }
+  // Every jittered attempt missed the real shape (rare, but for an extremely thin silhouette — the
+  // real Eiffel Tower artwork occupies well under 10% of its own bounding box — not negligible
+  // even at MAX_INSIDE_AIM_ATTEMPTS tries). outline.fallbackPoint is precomputed and GUARANTEED to
+  // satisfy containsPoint(), unlike another unguarded jitterAim call (or the shape's own authored
+  // center, which for a non-convex silhouette isn't actually guaranteed to be on it) would be.
+  return outline.fallbackPoint;
 }
 
 /** One pass over an outline's actual painted pixels — who's covered what, right now — PLUS any
@@ -169,6 +198,11 @@ function analyzeCoverage(outline: Outline, players: Player[], selfId: number, pe
         const dy = ly - localCy;
         if (dx * dx + dy * dy > r * r) continue;
         const pixelIdx = ly * w + lx;
+        // Pending shots only actually claim ground the real shape covers — paintSplat() clips
+        // everything else away, so crediting a shot for the part of its circular footprint that
+        // falls on real empty air (very possible for a thin/irregular silhouette) would make a
+        // splat that's mostly a miss look like real progress it never actually made.
+        if (outline.shapeMask[pixelIdx] !== 1) continue;
         const priorId = overlay.get(pixelIdx) ?? classifyIndex(pixelIdx * 4);
         if (priorId === proj.ownerId) continue;
         if (priorId !== -1) counts.set(priorId, (counts.get(priorId) ?? 0) - 1);
@@ -222,12 +256,14 @@ function analyzeCoverage(outline: Outline, players: Player[], selfId: number, pe
 
 /** Samples several candidate aim points and picks whichever scores best against real coverage —
  * painting over the leader first, open space second, another opponent third, this bot's own
- * already-claimed paint last (see AIM_SCORE). */
-function pickScoredAim(coverage: ReturnType<typeof analyzeCoverage>, cx: number, cy: number, radius: number): { x: number; y: number } {
-  let best = jitterAim(cx, cy, radius);
+ * already-claimed paint last (see AIM_SCORE). Every candidate is rejection-sampled against the
+ * outline's real shape (jitterAimInside), not just its bounding circle, so a thin or irregular
+ * silhouette can't end up scoring and picking a point that would actually land zero paint. */
+function pickScoredAim(outline: Outline, coverage: ReturnType<typeof analyzeCoverage>, cx: number, cy: number, radius: number): { x: number; y: number } {
+  let best = jitterAimInside(outline, cx, cy, radius);
   let bestScore = -Infinity;
   for (let i = 0; i < AIM_CANDIDATES; i++) {
-    const candidate = jitterAim(cx, cy, radius);
+    const candidate = jitterAimInside(outline, cx, cy, radius);
     const score = AIM_SCORE[coverage.classify(candidate.x, candidate.y)] + Math.random() * 0.1;
     if (score > bestScore) {
       bestScore = score;
@@ -288,17 +324,22 @@ export class CpuController {
 
     // Movement is hijacked by the Confusion power-up regardless of what we send — steering toward
     // a chosen target is pointless while it's active. Rather than wasting the whole effect doing
-    // nothing, charge continuously and fire the instant the random drift happens to carry the bot
-    // over any outline — opportunistic painting instead of saving a charge for a target there's no
-    // way to actually walk to right now. The real target/aim state is left untouched so normal
-    // seek-and-fire resumes exactly where it left off once the effect ends.
+    // nothing, charge continuously and fire once the random drift happens to have the bot over an
+    // outline WITH a reasonably charged shot ready — opportunistic painting instead of saving a
+    // charge for a target there's no way to actually walk to right now. Firing the instant drift
+    // carries it off an outline, whatever the charge level, used to mean a bot that started
+    // charging a moment ago could release a nearly-worthless sliver of a splat — holding at (or
+    // near) full charge costs nothing, so it's always worth waiting for CONFUSION_MIN_FIRE_FRAC
+    // before releasing, even if that means sitting off-outline fully charged until drift brings it
+    // back over one. The real target/aim state is left untouched so normal seek-and-fire resumes
+    // exactly where it left off once the effect ends.
     if (now < player.confusedUntil) {
       const overOutline = session.outlines.some((o) => o.mayOverlap(player.x, player.y, player.cursorRadius));
       const maxR = currentMaxRadius(player, now);
       const chargeFrac = (player.cursorRadius - MIN_RADIUS) / (maxR - MIN_RADIUS);
-      const stillCharging = overOutline && chargeFrac < 0.9;
-      bot.wasCharging = stillCharging;
-      bot.input = { up: false, down: false, left: false, right: false, paint: stillCharging };
+      const readyToFire = overOutline && chargeFrac >= CONFUSION_MIN_FIRE_FRAC;
+      bot.wasCharging = !readyToFire;
+      bot.input = { up: false, down: false, left: false, right: false, paint: !readyToFire };
       return;
     }
 
@@ -337,7 +378,17 @@ export class CpuController {
     const maxR = currentMaxRadius(player, now);
     const chargeFrac = (player.cursorRadius - MIN_RADIUS) / (maxR - MIN_RADIUS);
 
-    const charging = !(dist <= arrivalRadius && chargeFrac >= bot.fireThreshold);
+    // arrivalRadius grows with the shot's own charge, so "close enough" can mean tens of pixels
+    // away from the exact aim point by the time it's fully charged — harmless for a shape that
+    // fills its own bounding circle, but for a thin or irregular silhouette (the Eiffel Tower, the
+    // Statue of Liberty) that much slop is enough to have drifted off the real shape entirely even
+    // though the aim point itself (picked via jitterAimInside/pickScoredAim) was verified on it.
+    // Firing from there would land zero visible paint — a "complete miss" — despite every upstream
+    // check having been correct. Require the CURRENT position to actually be on real shape ground
+    // before releasing, not just close to the target.
+    const outline = bot.outlineIndex !== undefined ? session.outlines[bot.outlineIndex] : undefined;
+    const onTarget = !outline || outline.containsPoint(player.x, player.y);
+    const charging = !(dist <= arrivalRadius && chargeFrac >= bot.fireThreshold && onTarget);
     if (bot.wasCharging && !charging) {
       // This tick's release fires the projectile inside session.update(), which runs AFTER
       // CpuController.update() (see hostLoop.ts) — so it doesn't exist in session.projectiles yet
@@ -347,11 +398,20 @@ export class CpuController {
     }
     bot.wasCharging = charging;
 
+    // GameSession.updatePlaying applies this tick's movement BEFORE checking whether a release
+    // should fire — so on the exact tick a shot releases, still sending movement input would let
+    // the player drift a pixel or two past the position `onTarget` just verified, between the
+    // check above and the actual fire. Harmless for a normal shape (a pixel of drift is still
+    // deep inside it) but enough to occasionally miss a razor-thin silhouette (the Eiffel Tower's
+    // legs). Suppressing movement on the firing tick makes the fired position exactly the one
+    // just validated — there's no benefit to squeezing in one more step of movement anyway, since
+    // `charging` going false already means "close enough, aimed, and standing on real ground."
+    const moving = charging;
     bot.input = {
-      up: dy < -MOVE_DEADZONE,
-      down: dy > MOVE_DEADZONE,
-      left: dx < -MOVE_DEADZONE,
-      right: dx > MOVE_DEADZONE,
+      up: moving && dy < -MOVE_DEADZONE,
+      down: moving && dy > MOVE_DEADZONE,
+      left: moving && dx < -MOVE_DEADZONE,
+      right: moving && dx > MOVE_DEADZONE,
       paint: charging,
     };
   }
@@ -376,7 +436,7 @@ export class CpuController {
       bot.retargetAt = now; // nothing left worth aiming for here — move on right away
       return;
     }
-    const aim = pickScoredAim(coverage, bot.centerX, bot.centerY, bot.targetRadius);
+    const aim = pickScoredAim(outline, coverage, bot.centerX, bot.centerY, bot.targetRadius);
     bot.targetX = aim.x;
     bot.targetY = aim.y;
   }
@@ -482,7 +542,7 @@ export class CpuController {
     // boundingRadius, not the raw `radius` field — a rectangle-kind outline (the single-shape
     // "big one" round) sizes itself from width/height and has radius: 0.
     const radius = best.o.boundingRadius;
-    const aim = bestCoverage ? pickScoredAim(bestCoverage, best.o.cx, best.o.cy, radius) : jitterAim(best.o.cx, best.o.cy, radius);
+    const aim = bestCoverage ? pickScoredAim(best.o, bestCoverage, best.o.cx, best.o.cy, radius) : jitterAimInside(best.o, best.o.cx, best.o.cy, radius);
     return makeState(best.o.cx, best.o.cy, radius, false, best.i, aim);
   }
 }
