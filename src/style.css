@@ -28,6 +28,18 @@ body {
   gap: 10px;
 }
 
+#backToSuite {
+  align-self: flex-start;
+  color: #a99fb3;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+#backToSuite:hover {
+  color: #ffd60a;
+}
+
 #stage {
   width: 100%;
 }

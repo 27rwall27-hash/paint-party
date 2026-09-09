@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Paint Party</title>
+  </head>
+  <body>
+    <div id="app">
+      <a id="backToSuite" href="/">&larr; Suite</a>
+      <div id="stage">
+        <div id="hud">
+          <span id="hudRound"></span>
+          <span id="hudTimer"></span>
+          <span id="hudScores"></span>
+        </div>
+        <canvas id="game" width="1280" height="720"></canvas>
+      </div>
+
+      <div id="modeToggle">
+        <button type="button" id="modeLocalBtn" class="modeBtn selected">Local</button>
+        <button type="button" id="modeOnlineBtn" class="modeBtn">Online</button>
+      </div>
+
+      <div id="localPanel">
+        <p class="settingsHint">Playing solo — pick a name and color, then press any paint key to start.</p>
+        <div class="settingsRow">
+          <input id="localNameInput" type="text" maxlength="12" placeholder="P1" />
+        </div>
+        <div id="localColorPicker"></div>
+      </div>
+
+      <div id="online" hidden>
+        <p class="settingsHint">
+          Create a room and share the 4-letter code with friends, or enter a code someone shared
+          with you. Everyone online plays with WASD to move and Space to paint, regardless of
+          which slot they're assigned. Your name/color can be changed any time before the match
+          starts — just pick again below.
+        </p>
+        <div class="settingsRow">
+          <input id="onlineNameInput" type="text" placeholder="Your name" maxlength="12" />
+        </div>
+        <div id="onlineColorPicker"></div>
+
+        <div id="onlineJoinControls">
+          <div class="settingsRow">
+            <button id="onlineCreateBtn" type="button">Create Room</button>
+          </div>
+          <div class="settingsRow">
+            <input id="onlineJoinCode" type="text" placeholder="Code" maxlength="4" />
+            <button id="onlineJoinBtn" type="button">Join</button>
+          </div>
+        </div>
+
+        <p id="onlineStatus"></p>
+        <ul id="onlinePlayerList"></ul>
+
+        <div id="onlineRoomControls" hidden>
+          <div class="settingsRow">
+            <button id="onlineStartBtn" type="button" hidden>Start Match</button>
+            <button id="onlineLeaveBtn" type="button">Leave Room</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
