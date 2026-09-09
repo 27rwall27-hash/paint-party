@@ -1,6 +1,6 @@
 import type { GameSession } from "./GameSession.ts";
 import type { PlayerInputState } from "./Input.ts";
-import { activePlayers, currentMaxRadius, type Player } from "./Player.ts";
+import { activePlayers, currentMaxRadius, isMachineGunActive, type Player } from "./Player.ts";
 import { MIN_RADIUS } from "./constants.ts";
 import { hexToRgb, type Outline } from "./Outline.ts";
 
@@ -29,7 +29,7 @@ const AIM_JITTER_FRACTION = 0.8;
 // How many random candidate points get sampled (and scored against real paint coverage) each time
 // an aim point is picked — higher finds a better spot more reliably, at the cost of one more
 // classify() lookup each (cheap — a handful of array reads, not a fresh canvas scan).
-const AIM_CANDIDATES = 14;
+const AIM_CANDIDATES = 20;
 // Coverage-based scoring for a candidate aim point: painting over the current leader's color is
 // explicitly the top priority (contesting whoever's actually winning), open/unpainted space is
 // second, another (non-leading) opponent's paint is third, and this bot's OWN already-claimed
@@ -39,13 +39,27 @@ const AIM_SCORE = { leader: 3, empty: 2, other: 1, self: -3, outside: -5 } as co
 // bounding box — a relative, consistent-enough proxy, not exact shape-area accounting), treat it
 // as "already won, nothing left worth gaining here" for target SELECTION purposes.
 const SELF_DOMINANT_FRACTION = 0.8;
-// Selection-time bonuses (score is minimized — see pickTarget): contesting an outline someone
-// ELSE currently leads is worth more than one that's simply got open space, both meaningfully
-// more than raw distance alone so a bot doesn't just always beeline the nearest shape regardless
-// of whether there's anything worth doing there.
-const CONTEST_LEADER_BONUS = 260;
-const OPEN_SPACE_BONUS_SCALE = 180;
+// Selection-time bonuses (score is minimized — see pickTarget), both large enough relative to a
+// typical inter-outline distance (a few hundred px) to actually override "just go to whichever
+// shape is nearest" rather than being a minor tiebreaker. Contesting an outline someone ELSE
+// currently leads scales with how much of it they've actually claimed — a leader sitting on 90%
+// of a shape is a far more urgent target than one who's barely ahead by a few pixels — on top of a
+// flat base so even a slim lead is still worth going after. Open space gets its own, separately
+// meaningful bonus so a totally untouched outline competes for attention too, not just contested
+// ones.
+const CONTEST_LEADER_BASE_BONUS = 260;
+const CONTEST_LEADER_DOMINANCE_SCALE = 500;
+const OPEN_SPACE_BONUS_SCALE = 400;
 const ALREADY_DOMINANT_PENALTY = 6000;
+// The Machine Gun power-up auto-fires every ~60ms at wherever the player currently is (see
+// GameSession.updatePlaying) and pins cursorRadius at MIN_RADIUS the whole time, completely
+// bypassing the normal hold-to-charge/release-to-fire input this class relies on everywhere else
+// to know when a shot has landed — the charge-fraction "am I charged enough" check can never pass
+// with cursorRadius stuck at its minimum, so the usual "just fired, recompute aim" trigger never
+// fires under machine gun. Landing shots that fast, target refresh instead runs on its own short
+// timer so a spraying bot keeps sweeping across real ground (and can bail out of an already-full
+// outline) instead of converging on one point and parking there for the whole power-up duration.
+const MACHINEGUN_REFRESH_MS = 350;
 
 const NEUTRAL: PlayerInputState = { up: false, down: false, left: false, right: false, paint: false };
 
@@ -59,6 +73,8 @@ interface BotState {
   targetRadius: number;
   isPowerup: boolean;
   outlineIndex: number | undefined;
+  /** Next time a machine-gunning bot should re-evaluate its aim — see MACHINEGUN_REFRESH_MS. */
+  mgNextRefreshAt: number;
   fireThreshold: number;
   retargetAt: number;
   wasCharging: boolean;
@@ -69,10 +85,19 @@ interface BotHistory {
   lastOutlineIndex: number | undefined;
 }
 
-/** A random point within AIM_JITTER_FRACTION of `radius` from (cx, cy). */
+/** A random point within AIM_JITTER_FRACTION of `radius` from (cx, cy), uniformly distributed
+ * over the disc's AREA — not over its radius. Sampling distance directly from Math.random() (the
+ * original approach here) puts far more points near the center than out toward the edge: the ring
+ * between r and r+dr covers area proportional to r, so an r sampled uniformly in [0, max]
+ * oversamples small r relative to the area it actually represents. Over many candidates that bias
+ * compounds into every bot's aim quietly drifting toward the shape's center — which is very likely
+ * why bots kept clustering and "fighting" right in the middle of large outlines (most visibly
+ * "the big one" round's giant single rectangle, since there's nowhere else to go to escape it)
+ * despite huge amounts of untouched space nearer the edges. sqrt(random) is the standard fix: it's
+ * the inverse CDF for a uniform-over-disc-area distribution. */
 function jitterAim(cx: number, cy: number, radius: number): { x: number; y: number } {
   const angle = Math.random() * Math.PI * 2;
-  const dist = Math.random() * radius * AIM_JITTER_FRACTION;
+  const dist = radius * AIM_JITTER_FRACTION * Math.sqrt(Math.random());
   return { x: cx + Math.cos(angle) * dist, y: cy + Math.sin(angle) * dist };
 }
 
@@ -134,6 +159,7 @@ function analyzeCoverage(outline: Outline, players: Player[], selfId: number) {
   const totalPixels = outline.areaPixels;
   return {
     leaderId,
+    leaderFraction: leaderCount / totalPixels,
     selfFraction: (counts.get(selfId) ?? 0) / totalPixels,
     emptyFraction: Math.max(0, 1 - paintedPixels / totalPixels),
     /** "empty" | "self" | "leader" | "other" | "outside" the bbox entirely. */
@@ -237,6 +263,29 @@ export class CpuController {
       this.bots.set(player.id, bot);
     }
 
+    // Machine Gun auto-fires every ~60ms wherever the player currently is and pins cursorRadius
+    // at MIN_RADIUS the whole time (see GameSession.updatePlaying) — the charge/release detection
+    // just below can never trigger with radius stuck at its floor, so a spraying bot would
+    // otherwise walk to its first aim point, "arrive," and then just sit there landing dozens of
+    // shots on the same spot for the entire power-up duration. Refresh on a short timer instead.
+    if (isMachineGunActive(player, now)) {
+      if (now >= bot.mgNextRefreshAt) {
+        this.refreshTarget(bot, player, session, now);
+        bot.mgNextRefreshAt = now + MACHINEGUN_REFRESH_MS;
+      }
+      const mgDx = bot.targetX - player.x;
+      const mgDy = bot.targetY - player.y;
+      bot.wasCharging = true;
+      bot.input = {
+        up: mgDy < -MOVE_DEADZONE,
+        down: mgDy > MOVE_DEADZONE,
+        left: mgDx < -MOVE_DEADZONE,
+        right: mgDx > MOVE_DEADZONE,
+        paint: true, // irrelevant to actual firing while active, kept true for a clean resume after
+      };
+      return;
+    }
+
     const dx = bot.targetX - player.x;
     const dy = bot.targetY - player.y;
     const dist = Math.hypot(dx, dy);
@@ -246,7 +295,7 @@ export class CpuController {
 
     const charging = !(dist <= arrivalRadius && chargeFrac >= bot.fireThreshold);
     if (bot.wasCharging && !charging) {
-      this.onShotFired(bot, player, session, now);
+      this.refreshTarget(bot, player, session, now);
     }
     bot.wasCharging = charging;
 
@@ -259,10 +308,11 @@ export class CpuController {
     };
   }
 
-  /** Just fired — re-read this outline's actual coverage (it just changed) and either pick a
-   * fresh, still-useful aim point there or, if nothing productive is left, retarget immediately
-   * instead of running out the rest of the dwell timer re-covering already-claimed ground. */
-  private onShotFired(bot: BotState, player: Player, session: GameSession, now: number): void {
+  /** A shot just landed (a normal release, or a periodic check-in while machine-gunning — see
+   * MACHINEGUN_REFRESH_MS) — re-read this outline's actual coverage (it just changed) and either
+   * pick a fresh, still-useful aim point there or, if nothing productive is left, retarget
+   * immediately instead of running out the rest of the dwell re-covering already-claimed ground. */
+  private refreshTarget(bot: BotState, player: Player, session: GameSession, now: number): void {
     if (bot.outlineIndex === undefined) {
       // Power-up — a one-off claim, not a coverage area, just re-jitter normally.
       const aim = jitterAim(bot.centerX, bot.centerY, bot.targetRadius);
@@ -312,6 +362,7 @@ export class CpuController {
       fireThreshold,
       retargetAt,
       wasCharging: false,
+      mgNextRefreshAt: now,
       input: NEUTRAL,
     });
 
@@ -353,7 +404,10 @@ export class CpuController {
       // onto whichever's nearest to the group as a whole.
       const bias = ((player.id * 37 + i * 17) % 100) * 2.5;
       const coverage = analyzeCoverage(o, activePlayers(session.players), player.id);
-      const contestBonus = coverage.leaderId !== null && coverage.leaderId !== player.id ? CONTEST_LEADER_BONUS : 0;
+      const contestBonus =
+        coverage.leaderId !== null && coverage.leaderId !== player.id
+          ? CONTEST_LEADER_BASE_BONUS + coverage.leaderFraction * CONTEST_LEADER_DOMINANCE_SCALE
+          : 0;
       const openSpaceBonus = coverage.emptyFraction * OPEN_SPACE_BONUS_SCALE;
       const dominancePenalty = coverage.selfFraction >= SELF_DOMINANT_FRACTION ? ALREADY_DOMINANT_PENALTY : 0;
       const score = dist + bias - contestBonus - openSpaceBonus + dominancePenalty;
