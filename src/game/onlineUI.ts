@@ -150,6 +150,27 @@ export function initOnlineUI(): void {
           onlineMode.clockOffset === undefined ? offsetSample : onlineMode.clockOffset * 0.8 + offsetSample * 0.2;
 
         applyFast(onlineMode.session, payload, onlineMode.mySlot);
+
+        // Reconcile the guest's own predicted player against THIS channel's fresh position too,
+        // not just the throttled ~10Hz snapshot below — that snapshot alone made reconcile() work
+        // off data up to ~100ms stale, which is fine for steady movement (drift rarely exceeds the
+        // correction threshold) but not for rapid direction changes: a player flicking WASD to
+        // trace a circle generates real divergence fast enough to trip a fresh correction on
+        // nearly every ~100ms reconcile, each one still only partly blended in before the next
+        // stomps it with a new target — the same steady-state-lag pattern RemoteInterpolator had
+        // (see its CORRECTION_MS comment) before its correction cadence was tied to a fast enough
+        // channel. This payload already carries every player's x/y/cursorRadius every tick, so
+        // reconciling against it directly cuts staleness ~3x for free.
+        if (onlineMode.mySlot !== undefined && onlineMode.lastAuthoritativePlayer) {
+          const self = payload.positions.find((p) => p.id === onlineMode.mySlot);
+          if (self) {
+            onlineMode.lastAuthoritativePlayer.x = self.x;
+            onlineMode.lastAuthoritativePlayer.y = self.y;
+            onlineMode.lastAuthoritativePlayer.cursorRadius = self.cursorRadius;
+            onlineMode.predictedPlayer?.reconcile(onlineMode.lastAuthoritativePlayer, false);
+          }
+        }
+
         if (!onlineMode.interpolator) return;
         // RemoteInterpolator's own elapsed-time math is purely self-relative ("how long ago did I
         // get this sample") and must use a local monotonic clock, not onlineNow() — see the class
