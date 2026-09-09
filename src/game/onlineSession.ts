@@ -1,7 +1,7 @@
 import { GameSession } from "./GameSession.ts";
 import { Outline, Powerup } from "./Outline.ts";
 import * as sound from "./sound.ts";
-import type { PaintBatchPayload, PositionsPayload, SnapshotPayload } from "./netProtocol.ts";
+import type { FastPayload, SnapshotPayload } from "./netProtocol.ts";
 
 /** A GameSession driven entirely by host snapshots rather than its own update() loop — render.ts
  * reads it exactly the same way as a local session, so it needs zero changes for online play. */
@@ -50,13 +50,13 @@ export function applySnapshot(session: GameSession, payload: SnapshotPayload): b
   return roundChanged;
 }
 
-/** Applies the fast per-tick positions channel (see PositionsPayload) — erasers, cursor radius,
- * and the clock reference for extrapolating erasers live here since they arrive every host tick,
- * much more often than applySnapshot's ~10Hz. x/y themselves are handled by the caller
- * (onlineUI.ts), since they need to flow through RemoteInterpolator, not overwrite session.players
- * directly. `mySlot` is skipped for cursor radius the same way it is for position — the guest's
- * own charge level is already tracked live by local prediction, not this network payload. */
-export function applyPositions(session: GameSession, payload: PositionsPayload, mySlot: number | undefined): void {
+/** Applies the fast per-tick channel (see FastPayload) — erasers, cursor radius, this tick's
+ * paint events, and the clock reference all live here since they arrive every host tick, much
+ * more often than applySnapshot's ~10Hz. x/y themselves are handled by the caller (onlineUI.ts),
+ * since they need to flow through RemoteInterpolator, not overwrite session.players directly.
+ * `mySlot` is skipped for cursor radius the same way it is for position — the guest's own charge
+ * level is already tracked live by local prediction, not this network payload. */
+export function applyFast(session: GameSession, payload: FastPayload, mySlot: number | undefined): void {
   session.lastSnapshotAt = payload.hostNow;
   session.erasers = payload.erasers;
   for (const p of payload.positions) {
@@ -64,12 +64,8 @@ export function applyPositions(session: GameSession, payload: PositionsPayload, 
     const player = session.players.find((pl) => pl.id === p.id);
     if (player) player.cursorRadius = p.cursorRadius;
   }
-}
 
-/** Replays a batch of paint events onto a guest's local outline canvases so they visually match
- * the host's, without ever needing to send actual pixel data over the wire. */
-export function applyPaint(session: GameSession, payload: PaintBatchPayload): void {
-  for (const event of payload.events) {
+  for (const event of payload.paint) {
     const outline = session.outlines[event.outlineIndex];
     if (!outline) continue;
     if (event.kind === "splat") {

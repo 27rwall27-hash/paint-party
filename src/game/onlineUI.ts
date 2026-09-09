@@ -1,5 +1,5 @@
 import { NetworkClient } from "./NetworkClient.ts";
-import { applyPaint, applyPositions, applySnapshot, createOnlineSession } from "./onlineSession.ts";
+import { applyFast, applySnapshot, createOnlineSession } from "./onlineSession.ts";
 import { onlineMode, onlineNow } from "./onlineMode.ts";
 import { HostGameLoop } from "./hostLoop.ts";
 import { PredictedPlayer } from "./predictedPlayer.ts";
@@ -61,6 +61,7 @@ export function initOnlineUI(): void {
     onlineMode.role = "guest";
     onlineMode.sendInput = (state) => client?.sendInput(state);
     onlineMode.active = true;
+    onlineMode.connectionStatus = "connected";
     resetGuestSound();
   }
 
@@ -70,6 +71,7 @@ export function initOnlineUI(): void {
     onlineMode.role = "host";
     onlineMode.mySlot = 0;
     onlineMode.active = true;
+    onlineMode.connectionStatus = "connected";
     startBtnEl.hidden = false;
   }
 
@@ -81,6 +83,7 @@ export function initOnlineUI(): void {
       const c = new NetworkClient();
       client = c;
       c.onPresenceSync(renderRoster);
+      c.onConnectionStatus((s) => (onlineMode.connectionStatus = s));
       void c.createRoom(myName, myColor).then((code) => {
         statusEl.textContent = `Room ${code} — you're ${myName}. Share the code with friends.`;
         beginHostSession(c);
@@ -105,6 +108,7 @@ export function initOnlineUI(): void {
       const c = new NetworkClient();
       client = c;
       c.onPresenceSync(renderRoster);
+      c.onConnectionStatus((s) => (onlineMode.connectionStatus = s));
       c.onSlotAssigned((slot) => {
         statusEl.textContent = `Room ${code.toUpperCase()} — you're ${myName}.`;
         onlineMode.mySlot = slot;
@@ -136,7 +140,7 @@ export function initOnlineUI(): void {
         // linger and get lerped toward for the first ~30ms of the new round.
         if (roundChanged) onlineMode.interpolator?.reset();
       });
-      c.onPositions((payload) => {
+      c.onFast((payload) => {
         if (!onlineMode.session) return;
         // Same clock-offset estimate as the full snapshot, just refreshed 3x more often now that
         // this channel also carries hostNow — keeps the guest's clock-domain math (interpolation,
@@ -145,15 +149,12 @@ export function initOnlineUI(): void {
         onlineMode.clockOffset =
           onlineMode.clockOffset === undefined ? offsetSample : onlineMode.clockOffset * 0.8 + offsetSample * 0.2;
 
-        applyPositions(onlineMode.session, payload, onlineMode.mySlot);
+        applyFast(onlineMode.session, payload, onlineMode.mySlot);
         if (!onlineMode.interpolator) return;
         const now = onlineNow();
         for (const p of payload.positions) {
           if (p.id !== onlineMode.mySlot) onlineMode.interpolator.onSnapshot(p.id, p.x, p.y, now);
         }
-      });
-      c.onPaint((payload) => {
-        if (onlineMode.session) applyPaint(onlineMode.session, payload);
       });
       c.joinRoom(code, myName, myColor);
     } catch (err) {

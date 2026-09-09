@@ -97,25 +97,26 @@ export interface SnapshotPayload {
   revealedCount: number;
 }
 
-/** Host -> all: paint actions from this broadcast interval, batched, so guests can replay them
- * onto their own local paint canvases without needing pixel data over the wire. */
-export interface PaintBatchPayload {
-  events: PaintEvent[];
-}
-
-/** Host -> all: every player's position and cursor (charge) radius, plus the live eraser swarm,
- * broadcast every tick (30Hz) — decoupled from the much heavier, throttled (~10Hz) SnapshotPayload
- * so remote movement/charging isn't stuck jumping between ~100ms-stale values. All small (a
- * handful of tiny entries), so the extra message volume is cheap. cursorRadius in particular used
- * to only ride along in the throttled snapshot — charging grows it continuously and firing snaps
- * it back to MIN_RADIUS, so a remote player's cursor visibly jumped in size in ~100ms chunks right
- * around exactly the moments (charging, firing) most likely to draw attention to it. Erasers
- * aren't purely time-computable like the sweep brush (their heading changes randomly and bounces
- * off walls), so they still need this fresher raw sync rather than a formula — hostNow lets guests
- * extrapolate the small remaining gap from velocity in the same host-clock domain the rest of the
- * protocol uses. */
-export interface PositionsPayload {
+/** Host -> all: every player's position and cursor (charge) radius, the live eraser swarm, and
+ * this tick's paint events, broadcast every tick (30Hz) — decoupled from the much heavier,
+ * throttled (~10Hz) SnapshotPayload so remote movement/charging isn't stuck jumping between
+ * ~100ms-stale values. All small (a handful of tiny entries), so the extra message volume is
+ * cheap. cursorRadius in particular used to only ride along in the throttled snapshot — charging
+ * grows it continuously and firing snaps it back to MIN_RADIUS, so a remote player's cursor
+ * visibly jumped in size in ~100ms chunks right around exactly the moments (charging, firing)
+ * most likely to draw attention to it. Erasers aren't purely time-computable like the sweep brush
+ * (their heading changes randomly and bounces off walls), so they still need this fresher raw
+ * sync rather than a formula — hostNow lets guests extrapolate the small remaining gap from
+ * velocity in the same host-clock domain the rest of the protocol uses.
+ *
+ * Paint events used to ride a second every-tick broadcast of their own (a separate channel.send()
+ * call, same 30Hz cadence) — that doubled the outbound message rate for every tick that had any
+ * paint activity, which is exactly the case during sustained machine-gun fire (a new splat roughly
+ * every other tick). Folding paint in here halves the message count precisely when it was
+ * highest, for free — same information, one push instead of two. */
+export interface FastPayload {
   hostNow: number;
   positions: Array<{ id: number; x: number; y: number; cursorRadius: number }>;
   erasers: Eraser[];
+  paint: PaintEvent[];
 }

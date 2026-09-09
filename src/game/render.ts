@@ -26,6 +26,7 @@ import {
 import type { GameSession } from "./GameSession.ts";
 import type { Powerup } from "./Outline.ts";
 import { currentMaxRadius, isMachineGunActive } from "./Player.ts";
+import { onlineMode } from "./onlineMode.ts";
 import { ROUNDS } from "./rounds.ts";
 
 const BG = "#eef0f4";
@@ -75,6 +76,7 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
   if (session.state === "MENU") {
     drawMenu(ctx);
     drawFrame(ctx);
+    drawConnectionBanner(ctx, now);
     updateDomHud(session, now);
     return;
   }
@@ -85,6 +87,7 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
   if (session.state === "VICTORY") {
     drawFrame(ctx);
     drawVictory(ctx, session, now);
+    drawConnectionBanner(ctx, now);
     updateDomHud(session, now);
     return;
   }
@@ -117,7 +120,32 @@ export function render(ctx: CanvasRenderingContext2D, session: GameSession, now:
   if (session.state === "ROUND_INTRO") drawCurtain(ctx, session, now);
   if (session.state === "ROUND_RESULTS") drawResultsCurtain(ctx, session, now);
 
+  drawConnectionBanner(ctx, now);
   updateDomHud(session, now);
+}
+
+/** Online-only: a dropped Realtime channel used to look exactly like a frozen game — the board
+ * just stays as it last was, with no signal that anything's wrong (see the comment on
+ * OnlineMode.connectionStatus). This makes that state visible and, since NetworkClient retries on
+ * its own, transient — the banner clears itself the moment a fresh channel subscribes. */
+function drawConnectionBanner(ctx: CanvasRenderingContext2D, now: number): void {
+  const status = onlineMode.connectionStatus;
+  if (status !== "reconnecting" && status !== "disconnected") return;
+
+  const text = status === "reconnecting" ? "Reconnecting…" : "Connection lost";
+  const pulse = 0.75 + 0.25 * Math.sin(now / 220);
+
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = status === "reconnecting" ? "#2b2140" : "#4a1220";
+  const barH = 40;
+  ctx.fillRect(0, 0, CANVAS_W, barH);
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 20px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, CANVAS_W / 2, barH / 2);
+  ctx.restore();
 }
 
 /** Thick, ornate gallery picture frame around the whole canvas — HUD lives outside it, in the DOM.

@@ -27,6 +27,12 @@ export interface OnlineMode {
    * meaningfully-skewed guest clock produces negative elapsed times that break animation math and
    * can throw (see hostNow in netProtocol.ts). Undefined until the first snapshot arrives. */
   clockOffset: number | undefined;
+  /** Mirrors NetworkClient's ConnectionStatus, kept here so render.ts can draw a banner off it —
+   * a dropped Realtime channel with no visible feedback used to look exactly like a frozen game
+   * (session state stays on-screen at whatever it last received, while any already-playing local
+   * audio keeps going, since that's a plain HTMLAudioElement unrelated to the network). Undefined
+   * before the first connect and once a session starts fresh. */
+  connectionStatus: "connected" | "reconnecting" | "disconnected" | undefined;
 }
 
 export const onlineMode: OnlineMode = {
@@ -39,6 +45,7 @@ export const onlineMode: OnlineMode = {
   interpolator: undefined,
   lastAuthoritativePlayer: undefined,
   clockOffset: undefined,
+  connectionStatus: undefined,
 };
 
 /** Guest-only: "now" adjusted into the host's clock domain — use this instead of raw Date.now()
