@@ -71,18 +71,16 @@ export function startMusic(): void {
 }
 
 /**
- * Call once per round (0-indexed) — each round is 8% faster than the last, compounding. Pitch
- * preservation is set here based on whether this is the finale, not left for the ramp below to
- * flip mid-round: toggling a playing <audio> element's preservesPitch switches which resampling
- * algorithm the browser uses, which caused an audible glitch/shift the first time the finale's
- * ramp kicked in. Pre-engaging it now (during the finale's own round-intro silence) means the
- * first real ramp tick is just a plain, glitch-free rate nudge like every one after it.
+ * Call once per round (0-indexed) — each round is 8% faster than the last, compounding. Pitch is
+ * always preserved here, finale included — the round's own baseline speed bump (up to +36% by the
+ * finale) must never itself shift pitch, only the finale's separate escalating ramp below does
+ * that, and only once it's actually running.
  */
-export function setRoundSpeed(roundIndex: number, isFinale: boolean): void {
+export function setRoundSpeed(roundIndex: number): void {
   const multiplier = 1.08 ** roundIndex;
   roundSpeedMultiplier = multiplier;
   if (custom.music) {
-    custom.music.preservesPitch = !isFinale;
+    custom.music.preservesPitch = true;
     custom.music.playbackRate = multiplier;
   } else {
     audio.setTempoMultiplier(multiplier);
@@ -90,15 +88,18 @@ export function setRoundSpeed(roundIndex: number, isFinale: boolean): void {
   }
 }
 
-/** Finale-only: called every FINALE_INTENSITY_INTERVAL_MS with an incrementing level — ramps
- * tempo AND pitch together on top of the round's own baseline speed (level 0 == baseline, no
- * pitch shift yet), for a "speeding up" panic effect as the last round wears on. Linear, not
- * compounding — level 40 is +10% (40 * 0.25%), not 1.0025^40. preservesPitch is already set to
- * false for the whole finale by setRoundSpeed above, so this never has to touch it mid-round. */
+/** Finale-only: called every FINALE_INTENSITY_INTERVAL_MS once the ramp is running (see
+ * GameSession's FINALE_INTENSITY_START_DELAY_MS — it stays quiet for a while first), with an
+ * incrementing level — ramps tempo AND pitch together on top of the round's own baseline speed,
+ * for a "speeding up" panic effect that only becomes noticeable well into the last round. Linear,
+ * not compounding — level 40 is +10% (40 * 0.25%), not 1.0025^40. preservesPitch only flips on the
+ * very first call (level 1) and stays off for the rest of the round from there. */
 export function setFinaleIntensity(level: number): void {
   const multiplier = roundSpeedMultiplier * (1 + level * FINALE_INTENSITY_STEP_PCT);
-  if (custom.music) custom.music.playbackRate = multiplier;
-  else {
+  if (custom.music) {
+    custom.music.preservesPitch = false;
+    custom.music.playbackRate = multiplier;
+  } else {
     audio.setTempoMultiplier(multiplier);
     audio.setPitchMultiplier(multiplier);
   }

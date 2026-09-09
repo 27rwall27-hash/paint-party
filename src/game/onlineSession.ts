@@ -1,7 +1,7 @@
 import { GameSession } from "./GameSession.ts";
 import { Outline, Powerup } from "./Outline.ts";
 import * as sound from "./sound.ts";
-import type { PaintBatchPayload, SnapshotPayload } from "./netProtocol.ts";
+import type { PaintBatchPayload, PositionsPayload, SnapshotPayload } from "./netProtocol.ts";
 
 /** A GameSession driven entirely by host snapshots rather than its own update() loop — render.ts
  * reads it exactly the same way as a local session, so it needs zero changes for online play. */
@@ -18,7 +18,6 @@ export function createOnlineSession(): GameSession {
 export function applySnapshot(session: GameSession, payload: SnapshotPayload): boolean {
   const roundChanged = session.roundIndex !== payload.roundIndex || session.outlines.length === 0;
 
-  session.lastSnapshotAt = payload.hostNow;
   session.state = payload.state;
   session.roundIndex = payload.roundIndex;
   session.roundEndAt = payload.roundEndAt;
@@ -43,13 +42,21 @@ export function applySnapshot(session: GameSession, payload: SnapshotPayload): b
   });
   session.sweeps = payload.sweeps;
   session.projectiles = payload.projectiles;
-  session.erasers = payload.erasers;
   session.impacts = payload.impacts;
   session.lastResults = payload.lastResults;
   session.revealTimeline = payload.revealTimeline;
   session.revealedCount = payload.revealedCount;
 
   return roundChanged;
+}
+
+/** Applies the fast per-tick positions channel (see PositionsPayload) — erasers and the clock
+ * reference for extrapolating them live here since they arrive every host tick, much more often
+ * than applySnapshot's ~10Hz. Player positions themselves are handled by the caller (onlineUI.ts),
+ * since they need to flow through RemoteInterpolator, not overwrite session.players directly. */
+export function applyPositions(session: GameSession, payload: PositionsPayload): void {
+  session.lastSnapshotAt = payload.hostNow;
+  session.erasers = payload.erasers;
 }
 
 /** Replays a batch of paint events onto a guest's local outline canvases so they visually match

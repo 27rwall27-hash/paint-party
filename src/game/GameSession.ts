@@ -15,6 +15,7 @@ import {
   FINAL_BURST_AT_MS,
   FINAL_BURST_COUNT,
   FINALE_INTENSITY_INTERVAL_MS,
+  FINALE_INTENSITY_START_DELAY_MS,
   GUN_BASE_Y,
   GUN_LENGTH,
   gunStationX,
@@ -82,7 +83,7 @@ export interface SoundHooks {
   /** A full-charge Big Shot landing — bigger and more dramatic than a regular splat. */
   playKaboom(): void;
   playClaim(): void;
-  setRoundSpeed(roundIndex: number, isFinale: boolean): void;
+  setRoundSpeed(roundIndex: number): void;
   /** Finale-only: level increments every FINALE_INTENSITY_INTERVAL_MS spent playing that round —
    * ramps tempo and pitch together on top of the round's own baseline speed. */
   setFinaleIntensity(level: number): void;
@@ -376,7 +377,7 @@ export class GameSession {
     this.curtainSoundPlayed = false;
     this.finaleIntensityLevel = 0;
     this.sound.setUrgent(false);
-    this.sound.setRoundSpeed(index, index === ROUNDS.length - 1);
+    this.sound.setRoundSpeed(index);
   }
 
   private updatePlaying(dt: number, now: number, input: InputSource): void {
@@ -386,10 +387,16 @@ export class GameSession {
     // start on a shot before you're even allowed to move.
     const moveLocked = now - this.stateEnteredAt < MOVE_LOCK_MS;
 
-    // Finale-only panic ramp: every FINALE_INTENSITY_INTERVAL_MS spent actually playing the last
-    // round, the music gets another notch faster and higher-pitched on top of its normal baseline.
+    // Finale-only panic ramp: stays completely quiet (level 0, same as any other round) for the
+    // first FINALE_INTENSITY_START_DELAY_MS, then ticks up another notch every
+    // FINALE_INTENSITY_INTERVAL_MS after that — deliberately not something players notice right
+    // as the round begins.
     if (this.roundIndex === ROUNDS.length - 1) {
-      const level = Math.floor((now - this.stateEnteredAt) / FINALE_INTENSITY_INTERVAL_MS);
+      const finaleElapsed = now - this.stateEnteredAt;
+      const level =
+        finaleElapsed < FINALE_INTENSITY_START_DELAY_MS
+          ? 0
+          : 1 + Math.floor((finaleElapsed - FINALE_INTENSITY_START_DELAY_MS) / FINALE_INTENSITY_INTERVAL_MS);
       if (level !== this.finaleIntensityLevel) {
         this.finaleIntensityLevel = level;
         this.sound.setFinaleIntensity(level);

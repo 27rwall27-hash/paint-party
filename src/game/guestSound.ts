@@ -46,7 +46,7 @@ export function syncGuestSound(payload: SnapshotPayload): void {
 
   if (!isFirstSnapshot && roundChanged && payload.state === "ROUND_INTRO") {
     sound.setUrgent(false);
-    sound.setRoundSpeed(payload.roundIndex, isFinale);
+    sound.setRoundSpeed(payload.roundIndex);
     sound.playCurtain();
   }
 

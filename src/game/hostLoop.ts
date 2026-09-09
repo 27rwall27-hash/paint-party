@@ -103,10 +103,13 @@ export class HostGameLoop {
       this.pendingPaint = [];
     }
 
-    // Positions also go out every tick, same reasoning as paint above — remote cursor movement
-    // was interpolating across the throttled snapshot's ~100ms gap, which read as laggy.
+    // Positions and erasers also go out every tick, same reasoning as paint above — both were
+    // stuck interpolating/extrapolating across the throttled snapshot's ~100ms gap, which read as
+    // laggy for guests.
     this.client.broadcastPositions({
+      hostNow: now,
       positions: this.session.players.map((p) => ({ id: p.id, x: p.x, y: p.y })),
+      erasers: this.session.erasers,
     });
 
     this.tickCount++;
@@ -141,7 +144,6 @@ export class HostGameLoop {
       })),
       sweeps: this.session.sweeps,
       projectiles: this.session.projectiles,
-      erasers: this.session.erasers,
       impacts: this.session.impacts,
       lastResults: this.session.lastResults,
       revealTimeline: this.session.revealTimeline,

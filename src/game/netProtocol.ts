@@ -91,7 +91,6 @@ export interface SnapshotPayload {
   powerups: NetPowerup[];
   sweeps: Sweep[];
   projectiles: Projectile[];
-  erasers: Eraser[];
   impacts: Impact[];
   lastResults: OutlineResult[];
   revealTimeline: RevealStep[];
@@ -104,9 +103,15 @@ export interface PaintBatchPayload {
   events: PaintEvent[];
 }
 
-/** Host -> all: every player's position, broadcast every tick (30Hz) — decoupled from the much
- * heavier, throttled (~10Hz) SnapshotPayload so remote cursor movement isn't stuck interpolating
- * across a 100ms-stale gap. Small enough (4 tiny entries) that the extra message volume is cheap. */
+/** Host -> all: every player's position plus the live eraser swarm, broadcast every tick (30Hz) —
+ * decoupled from the much heavier, throttled (~10Hz) SnapshotPayload so remote movement isn't
+ * stuck interpolating/extrapolating across a 100ms-stale gap. Both are small (a handful of tiny
+ * entries), so the extra message volume is cheap. Erasers aren't purely time-computable like the
+ * sweep brush (their heading changes randomly and bounces off walls), so they still need this
+ * fresher raw sync rather than a formula — hostNow lets guests extrapolate the small remaining gap
+ * from velocity in the same host-clock domain the rest of the protocol uses. */
 export interface PositionsPayload {
+  hostNow: number;
   positions: Array<{ id: number; x: number; y: number }>;
+  erasers: Eraser[];
 }

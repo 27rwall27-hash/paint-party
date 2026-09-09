@@ -18,6 +18,7 @@ import {
   PROJECTILE_MIN_SCALE,
   RESULTS_LEADERBOARD_MS,
   ROUND_NUMBER_MS,
+  SWEEP_DURATION_MS,
   TICK_WINDOW_MS,
   VICTORY_CURTAIN_HOLD_MS,
   VICTORY_CURTAIN_OPEN_MS,
@@ -272,12 +273,19 @@ function drawPowerups(ctx: CanvasRenderingContext2D, session: GameSession, now: 
 
 function drawSweeps(ctx: CanvasRenderingContext2D, session: GameSession, now: number): void {
   for (const s of session.sweeps) {
+    // Recomputed live from elapsed time (matching GameSession.updateSweeps' own formula exactly)
+    // instead of drawing the synced s.x verbatim — that field only updates at the host's
+    // broadcast rate, so guests were seeing the brush jump between stale positions instead of
+    // moving smoothly. This way it's exact regardless of network timing, same as the curtain.
+    const t = Math.max(0, Math.min(1, (now - s.startedAt) / SWEEP_DURATION_MS));
+    const x = t * CANVAS_W;
+
     ctx.save();
     ctx.globalAlpha = 0.28;
     ctx.fillStyle = s.color;
     ctx.fillRect(0, s.bandY, CANVAS_W, s.bandH);
     ctx.globalAlpha = 0.4;
-    ctx.fillRect(s.x - 3, s.bandY, 6, s.bandH);
+    ctx.fillRect(x - 3, s.bandY, 6, s.bandH);
     ctx.restore();
 
     const bob = Math.sin(now / 60) * 4;
@@ -285,7 +293,7 @@ function drawSweeps(ctx: CanvasRenderingContext2D, session: GameSession, now: nu
     ctx.font = "28px 'Segoe UI', sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.translate(s.x, s.bandY + s.bandH / 2 + bob);
+    ctx.translate(x, s.bandY + s.bandH / 2 + bob);
     ctx.rotate(Math.PI / 4);
     ctx.fillText("🖌️", 0, 0);
     ctx.restore();

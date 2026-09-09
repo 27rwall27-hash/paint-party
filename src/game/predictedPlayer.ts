@@ -21,7 +21,13 @@ export class PredictedPlayer {
       this.lastUpdateAt = now;
     }
     const p = this.predicted;
-    // Non-predicted fields always come straight from the host.
+    // Non-predicted fields always come straight from the host. name/color in particular were
+    // only ever copied once, in the {...authoritative} spread above the first time this ran — a
+    // guest who customized their name/color right when joining could have that first snapshot
+    // race ahead of the host applying their presence-driven name/color, permanently freezing this
+    // guest's own on-screen label/cursor at whatever the very first snapshot happened to say.
+    p.name = authoritative.name;
+    p.color = authoritative.color;
     p.score = authoritative.score;
     p.shrinkUntil = authoritative.shrinkUntil;
     p.machineGunUntil = authoritative.machineGunUntil;

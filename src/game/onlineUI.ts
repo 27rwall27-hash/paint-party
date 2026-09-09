@@ -1,5 +1,5 @@
 import { NetworkClient } from "./NetworkClient.ts";
-import { applyPaint, applySnapshot, createOnlineSession } from "./onlineSession.ts";
+import { applyPaint, applyPositions, applySnapshot, createOnlineSession } from "./onlineSession.ts";
 import { onlineMode, onlineNow } from "./onlineMode.ts";
 import { HostGameLoop } from "./hostLoop.ts";
 import { PredictedPlayer } from "./predictedPlayer.ts";
@@ -137,6 +137,15 @@ export function initOnlineUI(): void {
         if (roundChanged) onlineMode.interpolator?.reset();
       });
       c.onPositions((payload) => {
+        if (!onlineMode.session) return;
+        // Same clock-offset estimate as the full snapshot, just refreshed 3x more often now that
+        // this channel also carries hostNow — keeps the guest's clock-domain math (interpolation,
+        // eraser extrapolation) tracking the host more tightly.
+        const offsetSample = payload.hostNow - Date.now();
+        onlineMode.clockOffset =
+          onlineMode.clockOffset === undefined ? offsetSample : onlineMode.clockOffset * 0.8 + offsetSample * 0.2;
+
+        applyPositions(onlineMode.session, payload);
         if (!onlineMode.interpolator) return;
         const now = onlineNow();
         for (const p of payload.positions) {
