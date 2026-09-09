@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stampede Sprint</title>
+  </head>
+  <body>
+    <div id="app">
+      <a id="backToSuite" href="/">&larr; Suite</a>
+      <canvas id="race" width="1280" height="720"></canvas>
+
+      <div id="setupPanel">
+        <p class="settingsHint">
+          8 racers, one obstacle at a time — click to jump, mistime it and you're sent to the back
+          of the pack. The race eventually splits in two, then in three; your final score is the
+          sum of your placement in all three at the end.
+        </p>
+        <div class="settingsRow">
+          <input id="racerNameInput" type="text" maxlength="12" placeholder="You" />
+        </div>
+        <div id="racerColorPicker"></div>
+        <div class="settingsRow">
+          <button id="startRaceBtn" type="button">Start Race</button>
+        </div>
+      </div>
+      <button id="raceAgainBtn" type="button" hidden>Race Again</button>
+    </div>
+    <script type="module" src="/src/stampede/main.ts"></script>
+  </body>
+</html>

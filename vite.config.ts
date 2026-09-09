@@ -7,7 +7,7 @@ export default defineConfig({
       input: {
         suite: fileURLToPath(new URL("./index.html", import.meta.url)),
         paintParty: fileURLToPath(new URL("./paint-party/index.html", import.meta.url)),
-        comingSoon: fileURLToPath(new URL("./coming-soon/index.html", import.meta.url)),
+        stampedeSprint: fileURLToPath(new URL("./stampede-sprint/index.html", import.meta.url)),
       },
     },
   },
