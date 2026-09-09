@@ -14,6 +14,7 @@ import {
   RACE_RAMP_SPAWN_FLOOR_MS,
   RACER_COUNT,
   SLIDE_SPEED_SLOTS_PER_SEC,
+  SPAWN_INTERVAL_JITTER,
 } from "./constants.ts";
 import type { RacerIdentity } from "./identities.ts";
 
@@ -99,6 +100,14 @@ function rollCpuSkill(baseSkill: number): number {
 function rampedValue(base: number, floor: number, race: RaceInstance, now: number): number {
   const rampT = Math.min(1, (now - race.startedAt) / RACE_RAMP_MS);
   return base + (floor - base) * rampT;
+}
+
+/** The gap before this race's next obstacle spawns — jittered (see SPAWN_INTERVAL_JITTER) so two
+ * or more races never settle into a perfectly fixed relative phase once both are fully ramped. */
+function nextSpawnDelay(race: RaceInstance, now: number): number {
+  const base = rampedValue(PHASE_BASE_SPAWN_MS[race.phase], RACE_RAMP_SPAWN_FLOOR_MS, race, now);
+  const jitter = 1 + (Math.random() * 2 - 1) * SPAWN_INTERVAL_JITTER;
+  return base * jitter;
 }
 
 /** Creates a fresh race from a starting lineup (an ordered list of identities, index 0 = 1st
@@ -198,7 +207,7 @@ export function updateRace(race: RaceInstance, dt: number, now: number, humanJum
       race.racers = [...obstacle.order.filter((r) => !r.knockedOutThisWave), ...obstacle.order.filter((r) => r.knockedOutThisWave)];
       for (const racer of obstacle.order) racer.knockedOutThisWave = false;
       race.obstacle = null;
-      race.nextObstacleAt = now + rampedValue(PHASE_BASE_SPAWN_MS[race.phase], RACE_RAMP_SPAWN_FLOOR_MS, race, now);
+      race.nextObstacleAt = now + nextSpawnDelay(race, now);
     }
   }
 

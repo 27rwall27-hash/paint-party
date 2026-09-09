@@ -25,6 +25,23 @@ export const SINGLE_PHASE_MS = 40_000;
 export const TWO_WAY_PHASE_MS = 40_000;
 export const THREE_WAY_PHASE_MS = 27_000;
 
+// Once a phase reaches its nominal duration, the actual screen split waits for BOTH of these
+// before executing (see StampedeSession.maybeSplit): at least this long has passed (so players
+// get a beat to see it coming, not an instant cut) AND every currently active race has no
+// obstacle in flight (so nobody's jump gets interrupted mid-obstacle by the world rearranging
+// under them).
+export const SPLIT_WARNING_MS = 3000;
+// Waiting for EVERY currently active race to be simultaneously between obstacles at the same
+// instant is, for 2+ independent races, a real coincidence that can take a very long time to
+// naturally occur (measured: sometimes 100+ seconds for the TWO_WAY -> THREE_WAY split, once in
+// testing it hadn't happened after 10 simulated minutes) - not an acceptable wait for a mechanic
+// meant to be a quick ~3s pause. So this is a hard CAP on the extra wait beyond SPLIT_WARNING_MS:
+// once it's exceeded, the split proceeds regardless of obstacle state. Usually unnecessary (a
+// clear moment across 1-2 races typically does turn up within a couple of wave cycles), but
+// guarantees the total wait is always bounded (SPLIT_WARNING_MS + this, worst case) instead of
+// potentially unbounded.
+export const MAX_SPLIT_EXTRA_WAIT_MS = 2500;
+
 // Placement -> points, index 0 = 1st place ... index 7 = 8th place. Only ever applied at the end
 // of the three simultaneous final races (see StampedeSession) — the earlier single/two-way phases
 // are pure setup, no scoring.
@@ -70,6 +87,14 @@ export const PHASE_BASE_SPAWN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", num
   THREE_WAY: 500,
 };
 export const RACE_RAMP_SPAWN_FLOOR_MS = 350;
+// Each spawn gap is jittered by +/- this fraction. Without ANY randomness here, once two or more
+// races have both fully ramped to their floor pacing their obstacle cycles become perfectly fixed
+// periods with a FIXED relative phase to each other — if that phase never happens to put both
+// races between obstacles at the same instant, they never will (a real, permanent soft-lock this
+// surfaced in testing: a session sat in TWO_WAY for 10+ simulated minutes waiting for a split that
+// was never coming). This jitter keeps the relative phase between races perpetually drifting
+// instead of frozen, so an overlapping "both clear" moment is guaranteed eventually.
+export const SPAWN_INTERVAL_JITTER = 0.35;
 
 // Ground level within a band — a fraction of the band's own height where every runner stands and
 // the shared obstacle travels, matching the classic endless-runner convention (the T-Rex game

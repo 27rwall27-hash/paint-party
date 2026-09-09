@@ -86,6 +86,93 @@ function drawSpike(ctx: CanvasRenderingContext2D, x: number, groundLineY: number
   ctx.fill();
 }
 
+/** A stick figure with a colored head — sprinting in place (legs/arms swinging on a continuous
+ * cycle, desynced per racer via `phaseSeed` so the pack doesn't move in creepy unison) while
+ * grounded, or thrown into an exaggerated "silly leap" pose (legs kicked out, arms flung up) while
+ * airborne, the pose easing in/out with the jump's own arc so it's most exaggerated at the peak.
+ * `footX/footY` is the ground contact point everything else is built upward from. */
+function drawStickFigure(
+  ctx: CanvasRenderingContext2D,
+  footX: number,
+  footY: number,
+  headRadius: number,
+  color: string,
+  now: number,
+  phaseSeed: number,
+  jumping: boolean,
+  jumpT: number,
+  isHuman: boolean,
+): void {
+  const legLen = headRadius * 2.1;
+  const torsoLen = headRadius * 2.2;
+  const armLen = headRadius * 1.7;
+  const hipY = footY - legLen;
+  const shoulderY = hipY - torsoLen;
+  const headY = shoulderY - headRadius * 1.15;
+
+  ctx.strokeStyle = "#eee6f0";
+  ctx.lineWidth = Math.max(2, headRadius * 0.28);
+  ctx.lineCap = "round";
+
+  // Torso — leans forward a touch to read as mid-sprint even when standing still between strides.
+  ctx.beginPath();
+  ctx.moveTo(footX + headRadius * 0.15, shoulderY);
+  ctx.lineTo(footX, hipY);
+  ctx.stroke();
+
+  if (jumping) {
+    // Exaggerated leap: legs kicked one forward one back, arms thrown straight up — pose eases in
+    // and out with jumpT (0 at takeoff/landing, 1 at the peak) so it doesn't just pop into place.
+    const kick = headRadius * (0.9 + 0.9 * jumpT);
+    const armRaise = headRadius * (0.6 + 1.1 * jumpT);
+    ctx.beginPath();
+    ctx.moveTo(footX, hipY);
+    ctx.lineTo(footX - kick, footY - headRadius * 0.4);
+    ctx.moveTo(footX, hipY);
+    ctx.lineTo(footX + kick * 0.75, footY + headRadius * 0.5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(footX, shoulderY);
+    ctx.lineTo(footX - armLen * 0.6, shoulderY - armRaise);
+    ctx.moveTo(footX, shoulderY);
+    ctx.lineTo(footX + armLen * 0.6, shoulderY - armRaise);
+    ctx.stroke();
+  } else {
+    // Continuous sprint cycle — legs/arms swing oppositely, like an actual running gait.
+    const phase = (now / 1000) * 11 + phaseSeed;
+    const legSwing = Math.sin(phase) * headRadius * 1.15;
+    const armSwing = Math.sin(phase + Math.PI) * headRadius * 0.9;
+    ctx.beginPath();
+    ctx.moveTo(footX, hipY);
+    ctx.lineTo(footX + legSwing, footY);
+    ctx.moveTo(footX, hipY);
+    ctx.lineTo(footX - legSwing, footY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(footX, shoulderY);
+    ctx.lineTo(footX + armSwing, shoulderY + headRadius * 1.1);
+    ctx.moveTo(footX, shoulderY);
+    ctx.lineTo(footX - armSwing, shoulderY + headRadius * 1.1);
+    ctx.stroke();
+  }
+
+  if (isHuman) {
+    ctx.beginPath();
+    ctx.arc(footX, headY, headRadius + 4, 0, Math.PI * 2);
+    ctx.strokeStyle = "#ffd60a";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  ctx.beginPath();
+  ctx.arc(footX, headY, headRadius, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.35)";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+}
+
 function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number): void {
   drawBandBackground(ctx, y, h, now);
 
@@ -101,6 +188,9 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   const groundY = y + h * GROUND_Y_FRACTION;
   const radius = Math.min(colWidth * 0.28, 17);
   const groundLineY = groundY + radius + 4;
+  // The stick figure's head — smaller than the old plain-circle radius since the whole figure
+  // (head + torso + legs) needs more total vertical room than a circle alone did.
+  const headRadius = radius * 0.55;
 
   ctx.strokeStyle = "rgba(255,255,255,0.12)";
   ctx.beginPath();
@@ -133,25 +223,17 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     const runnerX = slotX(racer.displaySlot);
     const isHuman = identity.id === 0;
 
+    const airborne = isAirborne(racer, now);
+    let jumpT = 0;
     let jumpOffset = 0;
-    if (isAirborne(racer, now)) {
+    if (airborne) {
       const t = Math.min(1, Math.max(0, (now - racer.jumpStartedAt) / JUMP_AIRTIME_MS));
-      jumpOffset = -Math.sin(t * Math.PI) * JUMP_ARC_HEIGHT_PX;
+      jumpT = Math.sin(t * Math.PI); // 0 at takeoff/landing, 1 at the peak — also drives the leap pose
+      jumpOffset = -jumpT * JUMP_ARC_HEIGHT_PX;
     }
-    const runnerY = groundY + jumpOffset;
+    const footY = groundLineY + jumpOffset;
 
-    if (isHuman) {
-      ctx.beginPath();
-      ctx.arc(runnerX, runnerY, radius + 4, 0, Math.PI * 2);
-      ctx.strokeStyle = "#ffd60a";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-
-    ctx.beginPath();
-    ctx.arc(runnerX, runnerY, radius, 0, Math.PI * 2);
-    ctx.fillStyle = identity.color;
-    ctx.fill();
+    drawStickFigure(ctx, runnerX, footY, headRadius, identity.color, now, racer.identityId * 1.9, airborne, jumpT, isHuman);
 
     ctx.fillStyle = "rgba(255,255,255,0.4)";
     ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
@@ -163,7 +245,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillText(identity.name, runnerX, groundY + radius + 8);
+    ctx.fillText(identity.name, runnerX, groundLineY + 8);
   });
 }
 
@@ -177,13 +259,24 @@ function drawHud(ctx: CanvasRenderingContext2D, session: StampedeSession, now: n
   ctx.textBaseline = "middle";
   ctx.fillText(PHASE_LABEL[session.phase] ?? session.phase, 20, HUD_HEIGHT / 2);
 
-  const duration = phaseDurationMs(session.phase);
-  if (duration > 0) {
-    const remaining = Math.max(0, Math.ceil((duration - (now - session.phaseEnteredAt)) / 1000));
-    ctx.fillStyle = "#a99fb3";
-    ctx.font = "14px 'Segoe UI', system-ui, sans-serif";
+  if (session.pendingSplitAt !== null) {
+    // Pulsing warning instead of the normal countdown — the actual split is being held back
+    // until SPLIT_WARNING_MS has passed AND every race is between obstacles (see
+    // StampedeSession.maybeSplit), so a plain "0s" would be misleading here.
+    const pulse = 0.55 + 0.45 * Math.sin((now / 1000) * 6);
+    ctx.fillStyle = `rgba(255, 138, 61, ${pulse.toFixed(2)})`;
+    ctx.font = "bold 14px 'Segoe UI', system-ui, sans-serif";
     ctx.textAlign = "right";
-    ctx.fillText(`${remaining}s`, CANVAS_W - 20, HUD_HEIGHT / 2);
+    ctx.fillText("⚠ Splitting soon...", CANVAS_W - 20, HUD_HEIGHT / 2);
+  } else {
+    const duration = phaseDurationMs(session.phase);
+    if (duration > 0) {
+      const remaining = Math.max(0, Math.ceil((duration - (now - session.phaseEnteredAt)) / 1000));
+      ctx.fillStyle = "#a99fb3";
+      ctx.font = "14px 'Segoe UI', system-ui, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(`${remaining}s`, CANVAS_W - 20, HUD_HEIGHT / 2);
+    }
   }
 
   if (session.phase !== "RESULTS") {
