@@ -35,33 +35,40 @@ export const JUMP_AIRTIME_MS = 550;
 // A jump's upward arc peaks at this fraction of the way through its airtime.
 export const JUMP_ARC_HEIGHT_PX = 46;
 
-// Obstacle pacing, per phase — spawn interval and scroll speed at the moment a race enters that
-// phase (a brand-new race, e.g. the one created at a split, starts here); RACE_RAMP_* below then
-// tightens both further over that race's own lifetime, capping at the floor/ceiling values.
+// Each of the 8 racers in a race has their OWN independently-scheduled obstacle stream (spawns at
+// different times per racer — see RaceInstance) but every obstacle in a given race travels at the
+// same shared pace: expressed directly as a travel TIME (spawn -> hit-line), not a pixel speed, so
+// it's automatically scale-invariant as bands shrink across phases (a column half as tall doesn't
+// implicitly make the game harder on top of the intentional difficulty ramp below).
+export const PHASE_BASE_REACTION_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
+  SINGLE: 2200,
+  TWO_WAY: 1850,
+  THREE_WAY: 1450,
+};
+// A race's own reaction time shrinks linearly over its first RACE_RAMP_MS of life, then holds at
+// the floor — so a long-lived continuing race (top/middle band) still gets meaningfully harder
+// over time, not just at phase boundaries.
+export const RACE_RAMP_MS = 20_000;
+export const RACE_RAMP_REACTION_FLOOR_MS = 950;
+
+// Base gap between one obstacle and the next FOR THE SAME RACER, per phase — RACE_RAMP_MS tightens
+// this too, down to RACE_RAMP_SPAWN_FLOOR_MS. Each actual spawn jitters this by +/-
+// SPAWN_INTERVAL_JITTER so 8 racers sharing the same formula still desync from each other over
+// time instead of just drifting by whatever fixed offset they happened to start with.
 export const PHASE_BASE_SPAWN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
   SINGLE: 1800,
   TWO_WAY: 1500,
   THREE_WAY: 1150,
 };
-export const PHASE_BASE_SPEED: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
-  SINGLE: 380,
-  TWO_WAY: 430,
-  THREE_WAY: 500,
-};
-// A race's own spawn interval shrinks and speed grows linearly over its first RACE_RAMP_MS of
-// life, then holds — so a long-lived continuing race (top/middle band) still gets meaningfully
-// harder over time, not just at phase boundaries.
-export const RACE_RAMP_MS = 20_000;
 export const RACE_RAMP_SPAWN_FLOOR_MS = 750;
-export const RACE_RAMP_SPEED_CEILING = 640;
+export const SPAWN_INTERVAL_JITTER = 0.3;
 
-// Total distance (px) an obstacle travels from spawning (off the right edge of its band) to the
-// hit line where it resolves against the racers — same for every phase; only scroll SPEED (see
-// PHASE_BASE_SPEED) changes how long that travel takes.
-export const OBSTACLE_TRAVEL_PX = 900;
-// Fixed x position (within a band, measured from its left edge) where the racers stand and an
-// obstacle resolves against them once its remaining distance reaches 0.
-export const HIT_LINE_X = 180;
+// Where a column's obstacle track sits, as a fraction of the column's own height — 0 = the very
+// top of the column, 1 = the very bottom. The hit-line (where racers stand, and where an obstacle
+// resolves) sits near the bottom; the obstacle "spawns" (progress 0) near the top. Fractions, not
+// pixels, so this scales automatically with column height too.
+export const OBSTACLE_TOP_FRACTION = 0.06;
+export const HIT_LINE_FRACTION = 0.86;
 
 // Per-identity base jump-success chance, randomized once at game start within this range — most
 // CPUs usually clear a jump but occasionally fail, giving the human a real chance without making

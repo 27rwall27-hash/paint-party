@@ -1,9 +1,10 @@
 import {
   CANVAS_H,
   CANVAS_W,
-  HIT_LINE_X,
+  HIT_LINE_FRACTION,
   JUMP_AIRTIME_MS,
   JUMP_ARC_HEIGHT_PX,
+  OBSTACLE_TOP_FRACTION,
   POINTS_BY_RANK,
   RACER_COUNT,
   SINGLE_PHASE_MS,
@@ -11,11 +12,12 @@ import {
   TWO_WAY_PHASE_MS,
 } from "./constants.ts";
 import type { RacerIdentity } from "./identities.ts";
-import { isAirborne, type RaceInstance } from "./RaceInstance.ts";
+import { isAirborne, obstacleProgress, type RaceInstance } from "./RaceInstance.ts";
 import type { StampedeSession } from "./StampedeSession.ts";
 
 const HUD_HEIGHT = 56;
 const BAND_GAP = 4;
+const COLUMN_GAP = 4;
 
 const PHASE_LABEL: Record<string, string> = {
   SINGLE: "The Pack",
@@ -52,80 +54,87 @@ function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number,
   ctx.fillStyle = "#241f29";
   ctx.fillRect(0, y, CANVAS_W, h);
 
-  // Simple scrolling stripes for a sense of forward motion — background moving behind the pack.
-  const stripeW = 46;
-  const scrollSpeedPxPerSec = 90;
+  // Simple scrolling stripes (vertical motion, matching the obstacles' own top-to-bottom travel)
+  // for a sense of forward motion.
+  const stripeH = 40;
+  const scrollSpeedPxPerSec = 70;
   const offset = (now / 1000) * scrollSpeedPxPerSec;
   ctx.strokeStyle = "rgba(255,255,255,0.05)";
   ctx.lineWidth = 2;
-  for (let x = -stripeW - (offset % stripeW); x < CANVAS_W; x += stripeW) {
+  for (let rowY = y - stripeH - (offset % stripeH); rowY < y + h; rowY += stripeH) {
     ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x, y + h);
+    ctx.moveTo(0, rowY);
+    ctx.lineTo(CANVAS_W, rowY);
     ctx.stroke();
   }
 
-  // Ground line near the bottom of the band.
-  ctx.strokeStyle = "rgba(255,255,255,0.12)";
-  ctx.beginPath();
-  ctx.moveTo(0, y + h - 6);
-  ctx.lineTo(CANVAS_W, y + h - 6);
-  ctx.stroke();
   ctx.restore();
 }
 
 function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number): void {
   drawBandBackground(ctx, y, h, now);
 
-  const laneH = h / RACER_COUNT;
-  const radius = Math.min(laneH * 0.32, 15);
+  const colWidth = (CANVAS_W - COLUMN_GAP * (RACER_COUNT - 1)) / RACER_COUNT;
+  const hitLineY = y + h * HIT_LINE_FRACTION;
+  const obstacleTopY = y + h * OBSTACLE_TOP_FRACTION;
+  const radius = Math.min(colWidth * 0.28, 17);
+
+  // Ground line where racers stand.
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.beginPath();
+  ctx.moveTo(0, hitLineY + radius + 4);
+  ctx.lineTo(CANVAS_W, hitLineY + radius + 4);
+  ctx.stroke();
 
   race.racers.forEach((racer, rank) => {
     const identity = identitiesById.get(racer.identityId);
     if (!identity) return;
-    const laneCenterY = y + laneH * rank + laneH / 2;
+    // Rank 0 (1st place) draws RIGHTMOST, last place draws LEFTMOST — a failed jump visibly
+    // knocks that racer's column to the far left, matching "knocked off screen to the left,
+    // rejoin the horizontal line at the back".
+    const displaySlot = RACER_COUNT - 1 - rank;
+    const colCenterX = displaySlot * (colWidth + COLUMN_GAP) + colWidth / 2;
     const isHuman = identity.id === 0;
+
+    if (racer.obstacle) {
+      const progress = obstacleProgress(racer.obstacle, now);
+      const obstacleY = obstacleTopY + progress * (hitLineY - obstacleTopY);
+      ctx.fillStyle = "#5c4a2e";
+      ctx.fillRect(colCenterX - colWidth * 0.32, obstacleY - 7, colWidth * 0.64, 14);
+    }
 
     let jumpOffset = 0;
     if (isAirborne(racer, now)) {
       const t = Math.min(1, Math.max(0, (now - racer.jumpStartedAt) / JUMP_AIRTIME_MS));
       jumpOffset = -Math.sin(t * Math.PI) * JUMP_ARC_HEIGHT_PX;
     }
-
-    // Rank badge.
-    ctx.fillStyle = "rgba(255,255,255,0.35)";
-    ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`${rank + 1}`, HIT_LINE_X - radius - 14, laneCenterY);
+    const runnerY = hitLineY + jumpOffset;
 
     if (isHuman) {
       ctx.beginPath();
-      ctx.arc(HIT_LINE_X, laneCenterY + jumpOffset, radius + 4, 0, Math.PI * 2);
+      ctx.arc(colCenterX, runnerY, radius + 4, 0, Math.PI * 2);
       ctx.strokeStyle = "#ffd60a";
       ctx.lineWidth = 2;
       ctx.stroke();
     }
 
     ctx.beginPath();
-    ctx.arc(HIT_LINE_X, laneCenterY + jumpOffset, radius, 0, Math.PI * 2);
+    ctx.arc(colCenterX, runnerY, radius, 0, Math.PI * 2);
     ctx.fillStyle = identity.color;
     ctx.fill();
 
-    ctx.fillStyle = "#fff";
-    ctx.font = "12px 'Segoe UI', system-ui, sans-serif";
-    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(identity.name, HIT_LINE_X + radius + 10, laneCenterY);
-  });
+    ctx.fillText(`${rank + 1}`, colCenterX, y + 14);
 
-  if (race.obstacle) {
-    const obstacleX = HIT_LINE_X + race.obstacle.distance;
-    if (obstacleX <= CANVAS_W + 20) {
-      ctx.fillStyle = "#5c4a2e";
-      ctx.fillRect(obstacleX - 8, y + 4, 16, h - 10);
-    }
-  }
+    ctx.fillStyle = "#fff";
+    ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(identity.name, colCenterX, hitLineY + radius + 8);
+  });
 }
 
 function drawHud(ctx: CanvasRenderingContext2D, session: StampedeSession, now: number): void {
