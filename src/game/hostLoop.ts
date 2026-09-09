@@ -103,6 +103,12 @@ export class HostGameLoop {
       this.pendingPaint = [];
     }
 
+    // Positions also go out every tick, same reasoning as paint above — remote cursor movement
+    // was interpolating across the throttled snapshot's ~100ms gap, which read as laggy.
+    this.client.broadcastPositions({
+      positions: this.session.players.map((p) => ({ id: p.id, x: p.x, y: p.y })),
+    });
+
     this.tickCount++;
     if (this.tickCount % BROADCAST_EVERY_N_TICKS === 0) {
       this.broadcastSnapshot(now);

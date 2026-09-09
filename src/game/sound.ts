@@ -3,13 +3,14 @@
 // synthesized engine (audio.ts) as the fallback — no settings UI, nothing to configure.
 //
 // Music plays continuously for the whole game once it starts — it's never stopped/restarted
-// between rounds — and gets 5% faster (compounding) each round via setRoundSpeed().
+// between rounds — and gets 8% faster (compounding) each round via setRoundSpeed().
 
 import * as audio from "./audio.ts";
 import { loadCustomAudio, type CustomAudioSet } from "./customAudio.ts";
 
-// music/start/finish are 22% quieter than their original levels (0.35/0.5/0.5).
-const DEFAULT_VOLUME = { music: 0.273, start: 0.39, finish: 0.39, victory: 0.5, drumroll: 0.55 };
+// music/start/finish are 22% quieter than their original levels (0.35/0.5/0.5); start/finish/
+// victory are then a further 10% quieter still (0.351/0.351/0.45).
+const DEFAULT_VOLUME = { music: 0.273, start: 0.351, finish: 0.351, victory: 0.45, drumroll: 0.55 };
 
 let custom: CustomAudioSet = { music: null, start: null, finish: null, victory: null, drumroll: null };
 let musicStarted = false;
@@ -66,11 +67,11 @@ export function startMusic(): void {
 }
 
 /**
- * Call once per round (0-indexed) — each round is 5% faster than the last, compounding. This is
+ * Call once per round (0-indexed) — each round is 8% faster than the last, compounding. This is
  * the ONLY thing that changes music tempo; nothing speeds it up mid-round.
  */
 export function setRoundSpeed(roundIndex: number): void {
-  const multiplier = 1.05 ** roundIndex;
+  const multiplier = 1.08 ** roundIndex;
   if (custom.music) custom.music.playbackRate = multiplier;
   else audio.setTempoMultiplier(multiplier);
 }
@@ -120,7 +121,7 @@ export function playVictoryTheme(): void {
     custom.victory.currentTime = 0;
     void custom.victory.play().catch(() => {});
   } else {
-    audio.playVictory();
+    audio.playVictory(DEFAULT_VOLUME.victory);
   }
 }
 

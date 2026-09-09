@@ -103,3 +103,10 @@ export interface SnapshotPayload {
 export interface PaintBatchPayload {
   events: PaintEvent[];
 }
+
+/** Host -> all: every player's position, broadcast every tick (30Hz) — decoupled from the much
+ * heavier, throttled (~10Hz) SnapshotPayload so remote cursor movement isn't stuck interpolating
+ * across a 100ms-stale gap. Small enough (4 tiny entries) that the extra message volume is cheap. */
+export interface PositionsPayload {
+  positions: Array<{ id: number; x: number; y: number }>;
+}

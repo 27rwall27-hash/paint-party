@@ -131,11 +131,16 @@ export function initOnlineUI(): void {
             onlineMode.predictedPlayer?.reconcile(authoritative, roundChanged);
           }
         }
-        if (onlineMode.interpolator) {
-          const now = onlineNow();
-          for (const p of payload.players) {
-            if (p.id !== onlineMode.mySlot) onlineMode.interpolator.onSnapshot(p.id, p.x, p.y, now);
-          }
+        // Remote players' positions come from the faster onPositions channel below now, not this
+        // throttled snapshot — reset on a round change so a stale pre-round-change target doesn't
+        // linger and get lerped toward for the first ~30ms of the new round.
+        if (roundChanged) onlineMode.interpolator?.reset();
+      });
+      c.onPositions((payload) => {
+        if (!onlineMode.interpolator) return;
+        const now = onlineNow();
+        for (const p of payload.positions) {
+          if (p.id !== onlineMode.mySlot) onlineMode.interpolator.onSnapshot(p.id, p.x, p.y, now);
         }
       });
       c.onPaint((payload) => {

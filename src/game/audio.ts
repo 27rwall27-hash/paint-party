@@ -79,7 +79,7 @@ export function playKaboom(): void {
   filter.frequency.setValueAtTime(1800, c.currentTime);
   filter.frequency.exponentialRampToValueAtTime(90, c.currentTime + 0.35);
   const gain = c.createGain();
-  gain.gain.setValueAtTime(0.7, c.currentTime);
+  gain.gain.setValueAtTime(0.805, c.currentTime); // was 0.7 — +15%
   gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.4);
   src.connect(filter).connect(gain).connect(master);
   src.start();
@@ -90,7 +90,7 @@ export function playKaboom(): void {
   boom.type = "sine";
   boom.frequency.setValueAtTime(140, c.currentTime);
   boom.frequency.exponentialRampToValueAtTime(35, c.currentTime + 0.4);
-  boomGain.gain.setValueAtTime(0.6, c.currentTime);
+  boomGain.gain.setValueAtTime(0.69, c.currentTime); // was 0.6 — +15%
   boomGain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.45);
   boom.connect(boomGain).connect(master);
   boom.start();
@@ -148,8 +148,11 @@ export function playCurtain(): void {
   src.stop(c.currentTime + 0.65);
 }
 
-export function playVictory(): void {
-  [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.12, 0.35, "triangle", 0.28));
+/** volume is on the same 0-1-ish scale as DEFAULT_VOLUME.victory in sound.ts — 0.5 is the original
+ * baseline these peaks were tuned against, so anything else scales proportionally from there. */
+export function playVictory(volume = 0.5): void {
+  const mul = volume / 0.5;
+  [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.12, 0.35, "triangle", 0.28 * mul));
 }
 
 /** A snare-style drum roll that accelerates into a final crash — scheduled up front as a fixed

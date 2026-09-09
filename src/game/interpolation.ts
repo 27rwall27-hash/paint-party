@@ -6,8 +6,10 @@ interface InterpState {
   receivedAt: number;
 }
 
-// Matches hostLoop's broadcast interval (30Hz simulation / 3 = ~10Hz, i.e. ~100ms apart).
-const EXPECTED_INTERVAL_MS = 100;
+// Matches hostLoop's position broadcast interval — every simulation tick (30Hz, ~33ms apart),
+// decoupled from the throttled ~10Hz full snapshot. Tighter than the old 100ms window means less
+// visible "catch-up" lag between when a remote player actually moves and when it reads that way.
+const EXPECTED_INTERVAL_MS = 34;
 
 /** Smooths remote (non-locally-controlled) players' movement between snapshots so it doesn't
  * look like discrete teleport-steps — a lighter-weight complement to PredictedPlayer, which only

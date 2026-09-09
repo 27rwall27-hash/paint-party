@@ -4,6 +4,7 @@ import type { PlayerInputState } from "./Input.ts";
 import type {
   InputPayload,
   PaintBatchPayload,
+  PositionsPayload,
   PresencePayload,
   RoomErrorPayload,
   SlotAssignPayload,
@@ -36,6 +37,7 @@ export class NetworkClient {
   private presenceSyncHandlers: Array<(entries: PresencePayload[]) => void> = [];
   private snapshotHandlers: Array<(payload: SnapshotPayload) => void> = [];
   private paintHandlers: Array<(payload: PaintBatchPayload) => void> = [];
+  private positionsHandlers: Array<(payload: PositionsPayload) => void> = [];
   private guestInputHandlers: Array<(slot: number, state: PlayerInputState) => void> = [];
 
   onSlotAssigned(handler: (slot: number) => void): void {
@@ -52,6 +54,9 @@ export class NetworkClient {
   }
   onPaint(handler: (payload: PaintBatchPayload) => void): void {
     this.paintHandlers.push(handler);
+  }
+  onPositions(handler: (payload: PositionsPayload) => void): void {
+    this.positionsHandlers.push(handler);
   }
   /** Host-only: fires whenever a guest's input broadcast arrives. */
   onGuestInput(handler: (slot: number, state: PlayerInputState) => void): void {
@@ -77,6 +82,9 @@ export class NetworkClient {
     });
     channel.on("broadcast", { event: "paint" }, ({ payload }) => {
       for (const handler of this.paintHandlers) handler(payload as PaintBatchPayload);
+    });
+    channel.on("broadcast", { event: "positions" }, ({ payload }) => {
+      for (const handler of this.positionsHandlers) handler(payload as PositionsPayload);
     });
   }
 
@@ -209,5 +217,11 @@ export class NetworkClient {
   /** Host-only: broadcasts this interval's paint events to every guest. */
   broadcastPaint(payload: PaintBatchPayload): void {
     void this.channel?.send({ type: "broadcast", event: "paint", payload });
+  }
+
+  /** Host-only: broadcasts every player's position — see PositionsPayload for why this is its own
+   * every-tick channel instead of riding along in the throttled snapshot. */
+  broadcastPositions(payload: PositionsPayload): void {
+    void this.channel?.send({ type: "broadcast", event: "positions", payload });
   }
 }
