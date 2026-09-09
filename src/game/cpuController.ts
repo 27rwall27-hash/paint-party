@@ -10,8 +10,11 @@ import { MIN_RADIUS } from "./constants.ts";
 const RETARGET_MIN_MS = 2200;
 const RETARGET_MAX_MS = 4200;
 // How much closer than "touching" a bot tries to get before it's considered close enough to fire
-// — firing always lands exactly at the bot's own current position (same as a human release), so
-// this has to be small enough that the shot actually lands on the target, not near it.
+// — deliberately measured against the player's own charge radius only, NOT the target's size, so
+// a bot genuinely walks to its specific (jittered) aim point before releasing. Including the
+// target's radius here used to let a bot fire the instant it entered the outline's general
+// vicinity, from wherever its approach path happened to be — which meant every shot landed near
+// the same handful of entry points instead of actually reaching the varied spot it was aiming for.
 const ARRIVAL_MARGIN = 6;
 // Fraction of full charge a bot's radius needs to reach before it's "worth" releasing once in
 // range, randomized per target pick for variety — always charging to 100% would read as
@@ -27,9 +30,15 @@ const MOVE_DEADZONE = 8;
 const POWERUP_CHASE_CHANCE = 0.45;
 const POWERUP_CHASE_MAX_DIST = 420;
 // How far a per-shot aim point can land from the target's true center, as a fraction of its
-// radius — without this, every shot for the whole target-dwell period (and every future dwell on
-// the same outline) lands on the exact same pixel, since aiming was just "the outline's center."
-const AIM_JITTER_FRACTION = 0.65;
+// (effective) radius — without this, every shot for the whole target-dwell period (and every
+// future dwell on the same outline) lands on the exact same pixel, since aiming was just "the
+// outline's center."
+const AIM_JITTER_FRACTION = 0.8;
+// Cost added to an outline's selection score per shot this bot has already landed there this
+// round — the single biggest lever for "spread across every section instead of camping one":
+// without it, the nearest outline (plus each bot's small fixed distance bias) wins every retarget
+// forever, since nothing about that ranking ever changes as the round goes on.
+const COVERAGE_PENALTY_PER_SHOT = 220;
 
 const NEUTRAL: PlayerInputState = { up: false, down: false, left: false, right: false, paint: false };
 
@@ -43,12 +52,26 @@ interface BotState {
    * shots at the same outline land in different spots instead of stacking on one pixel. */
   targetX: number;
   targetY: number;
+  /** The target's own effective size — an outline's `boundingRadius` (NOT its raw `.radius`,
+   * which for a rectangle-kind outline like "the big one" round is 0 and would collapse aiming to
+   * a single point) or a power-up's plain `.radius`. */
   targetRadius: number;
   isPowerup: boolean;
+  /** Which outline index this target is (undefined for a power-up) — tracked so a fired shot can
+   * be credited to the right per-bot coverage counter. */
+  outlineIndex: number | undefined;
   fireThreshold: number;
   retargetAt: number;
   wasCharging: boolean;
   input: PlayerInputState;
+}
+
+/** Persists across retargets (unlike BotState, which gets replaced wholesale each time) — what
+ * this bot has already been doing this round, so target SELECTION can actually improve on "always
+ * pick the nearest thing again." */
+interface BotHistory {
+  lastOutlineIndex: number | undefined;
+  shotsByOutline: Map<number, number>;
 }
 
 /** A random point within AIM_JITTER_FRACTION of `radius` from (cx, cy) — small radius (a
@@ -65,9 +88,18 @@ function jitterAim(cx: number, cy: number, radius: number): { x: number; y: numb
  * already-charged, same as a human who holds paint while walking in) and releases once both
  * "close enough" and "charged enough" agree — since a release always lands paint exactly at the
  * bot's current position, not thrown toward a distant point, arriving in position before firing
- * is what actually lands the shot on the target instead of wherever the bot happened to be. */
+ * is what actually lands the shot on the target instead of wherever the bot happened to be.
+ *
+ * Target SELECTION deliberately isn't pure nearest-shape: it actively avoids re-picking the
+ * outline it was just painting (unless it's the only one, e.g. the single-outline "big one"
+ * round) and prefers whichever outline it's painted the least so far this round — a bot that just
+ * keeps re-winning the same "nearest" comparison every retarget forever is exactly what reads as
+ * "camping one section," and painting a full spread of outlines (each shot's jitter landing
+ * somewhere new, see jitterAim) is also what actually displaces an existing leader's coverage
+ * there, not just adding a token dab in a corner nobody else touched. */
 export class CpuController {
   private bots = new Map<number, BotState>();
+  private history = new Map<number, BotHistory>();
   private lastRoundIndex: number | undefined;
 
   /** Call once per simulation tick, before GameSession.update() reads input — recomputes this
@@ -75,11 +107,13 @@ export class CpuController {
   update(session: GameSession, now: number): void {
     // A new round means a whole new outline layout — a target cached from the previous round
     // could easily be stale (empty space with nothing left to walk to) for as long as
-    // RETARGET_MAX_MS otherwise. Cleared here rather than relying on the caller to notice a round
-    // changed, so nothing has to wire that up separately for local vs. host.
+    // RETARGET_MAX_MS otherwise, and last round's coverage history no longer means anything.
+    // Cleared here rather than relying on the caller to notice a round changed, so nothing has to
+    // wire that up separately for local vs. host.
     if (session.roundIndex !== this.lastRoundIndex) {
       this.lastRoundIndex = session.roundIndex;
       this.bots.clear();
+      this.history.clear();
     }
     if (session.state !== "PLAYING") return; // nothing to decide outside active play
     for (const player of session.players) {
@@ -96,6 +130,7 @@ export class CpuController {
 
   reset(): void {
     this.bots.clear();
+    this.history.clear();
   }
 
   private decide(player: Player, session: GameSession, now: number): void {
@@ -108,15 +143,20 @@ export class CpuController {
     const dx = bot.targetX - player.x;
     const dy = bot.targetY - player.y;
     const dist = Math.hypot(dx, dy);
-    const arrivalRadius = bot.targetRadius + player.cursorRadius + ARRIVAL_MARGIN;
+    const arrivalRadius = player.cursorRadius + ARRIVAL_MARGIN;
     const maxR = currentMaxRadius(player, now);
     const chargeFrac = (player.cursorRadius - MIN_RADIUS) / (maxR - MIN_RADIUS);
 
     const charging = !(dist <= arrivalRadius && chargeFrac >= bot.fireThreshold);
-    // Release edge (was charging, now firing) — pick a fresh aim point near the same target's
-    // center for the NEXT approach, so a bot painting the same outline for a while spreads its
-    // shots across it instead of stacking every single one on the exact center pixel.
+    // Release edge (was charging, now firing) — credit this shot to the outline it landed on,
+    // then pick a fresh aim point near the same target's center for the next approach, so a bot
+    // painting the same outline for a while spreads its shots across it instead of stacking every
+    // single one on the exact same pixel.
     if (bot.wasCharging && !charging) {
+      if (bot.outlineIndex !== undefined) {
+        const h = this.historyFor(player.id);
+        h.shotsByOutline.set(bot.outlineIndex, (h.shotsByOutline.get(bot.outlineIndex) ?? 0) + 1);
+      }
       const aim = jitterAim(bot.centerX, bot.centerY, bot.targetRadius);
       bot.targetX = aim.x;
       bot.targetY = aim.y;
@@ -134,6 +174,15 @@ export class CpuController {
     };
   }
 
+  private historyFor(playerId: number): BotHistory {
+    let h = this.history.get(playerId);
+    if (!h) {
+      h = { lastOutlineIndex: undefined, shotsByOutline: new Map() };
+      this.history.set(playerId, h);
+    }
+    return h;
+  }
+
   /** A chased power-up can vanish (claimed by someone, or its own timer expiring) well before the
    * next scheduled retarget — checked every tick so a bot doesn't keep charging toward empty air. */
   private targetIsGone(bot: BotState, session: GameSession): boolean {
@@ -144,7 +193,7 @@ export class CpuController {
   private pickTarget(player: Player, session: GameSession, now: number): BotState {
     const retargetAt = now + RETARGET_MIN_MS + Math.random() * (RETARGET_MAX_MS - RETARGET_MIN_MS);
     const fireThreshold = FIRE_THRESHOLD_MIN + Math.random() * (FIRE_THRESHOLD_MAX - FIRE_THRESHOLD_MIN);
-    const makeState = (cx: number, cy: number, radius: number, isPowerup: boolean): BotState => {
+    const makeState = (cx: number, cy: number, radius: number, isPowerup: boolean, outlineIndex: number | undefined): BotState => {
       const aim = jitterAim(cx, cy, radius);
       return {
         centerX: cx,
@@ -153,6 +202,7 @@ export class CpuController {
         targetY: aim.y,
         targetRadius: radius,
         isPowerup,
+        outlineIndex,
         fireThreshold,
         retargetAt,
         wasCharging: false,
@@ -172,27 +222,41 @@ export class CpuController {
         }
       }
       if (nearestDist <= POWERUP_CHASE_MAX_DIST) {
-        return makeState(nearest.cx, nearest.cy, nearest.radius, true);
+        return makeState(nearest.cx, nearest.cy, nearest.radius, true, undefined);
       }
     }
 
     if (session.outlines.length === 0) {
-      return makeState(player.x, player.y, 0, false);
+      return makeState(player.x, player.y, 0, false, undefined);
     }
-    // Nearest outline wins most of the time, but each bot has its own small stable bias per
-    // outline (deterministic from playerId+index, not re-rolled every pick) so multiple bots
-    // spread across different shapes instead of all beelining for the exact same one.
-    let best = session.outlines[0]!;
+
+    const history = this.historyFor(player.id);
+    // Excludes whichever outline this bot was just painting, so long as there's actually another
+    // option — a single-outline round ("the big one") has nothing else to rotate onto.
+    const pool =
+      session.outlines.length > 1
+        ? session.outlines.map((o, i) => ({ o, i })).filter(({ i }) => i !== history.lastOutlineIndex)
+        : session.outlines.map((o, i) => ({ o, i }));
+
+    let best = pool[0]!;
     let bestScore = Infinity;
-    session.outlines.forEach((o, i) => {
+    for (const { o, i } of pool) {
       const dist = Math.hypot(o.cx - player.x, o.cy - player.y);
+      // Small stable per-bot bias so multiple bots don't all rank outlines identically and pile
+      // onto whichever's nearest to the group as a whole; the coverage penalty below is what
+      // actually drives "spread across every section," this is just tie-breaking variety.
       const bias = ((player.id * 37 + i * 17) % 100) * 2.5;
-      const score = dist + bias;
+      const shotsHere = history.shotsByOutline.get(i) ?? 0;
+      const score = dist + bias + shotsHere * COVERAGE_PENALTY_PER_SHOT;
       if (score < bestScore) {
         bestScore = score;
-        best = o;
+        best = { o, i };
       }
-    });
-    return makeState(best.cx, best.cy, best.radius, false);
+    }
+    history.lastOutlineIndex = best.i;
+    // boundingRadius, not the raw `radius` field — a rectangle-kind outline (the single-shape
+    // "big one" round) sizes itself from width/height and has radius: 0, which would collapse
+    // aiming to one exact point and make the whole outline nearly unreachable to "arrive" at.
+    return makeState(best.o.cx, best.o.cy, best.o.boundingRadius, false, best.i);
   }
 }
