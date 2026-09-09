@@ -107,6 +107,21 @@ export const MULTI_OBSTACLE_CHANCE = 0;
 export const MULTI_OBSTACLE_STAGGER_MIN_MS = 350;
 export const MULTI_OBSTACLE_STAGGER_MAX_MS = 750;
 
+// Cross-band clustering: when a race's wave finishes and it schedules its NEXT obstacle, there's a
+// good chance it instead snaps to line up with another currently-idle race's already-upcoming
+// obstacle (still exactly one obstacle per band — this never stacks two obstacles in the SAME
+// race). With 2 or 3 active bands, this means holding 1st place everywhere stops being one easy,
+// fully predictable reflex repeated in isolation — obstacles across bands land close together
+// often enough that clearing all of them means genuinely dividing attention between
+// near-simultaneous threats in different bands, the same kind of challenge that naturally shows up
+// when you're at different ranks in different races.
+export const CLUSTER_CHANCE = 0.6;
+// Only clusters onto another race's spawn if it's already scheduled within this many ms.
+export const CLUSTER_WINDOW_MS = 900;
+// Small random offset applied even when clustering, so aligned obstacles aren't literally
+// frame-identical every time.
+export const CLUSTER_STAGGER_MAX_MS = 80;
+
 // Ground level within a band — a fraction of the band's own height where every runner stands and
 // the shared obstacle travels, matching the classic endless-runner convention (the T-Rex game
 // this is modeled on): characters and the obstacle share one ground line, the obstacle moves

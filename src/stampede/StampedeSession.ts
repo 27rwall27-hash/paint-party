@@ -1,4 +1,4 @@
-import { ABSOLUTE_MAX_SPLIT_WAIT_MS, POINTS_BY_RANK, PRE_SPLIT_QUIET_MS, SINGLE_PHASE_MS, THREE_WAY_PHASE_MS, TWO_WAY_PHASE_MS } from "./constants.ts";
+import { ABSOLUTE_MAX_SPLIT_WAIT_MS, CLUSTER_CHANCE, CLUSTER_STAGGER_MAX_MS, CLUSTER_WINDOW_MS, POINTS_BY_RANK, PRE_SPLIT_QUIET_MS, SINGLE_PHASE_MS, THREE_WAY_PHASE_MS, TWO_WAY_PHASE_MS } from "./constants.ts";
 import type { RacerIdentity } from "./identities.ts";
 import { createRaceInstance, rollBaseSkill, updateRace, type RaceInstance } from "./RaceInstance.ts";
 
@@ -79,15 +79,43 @@ function maybeSplit(session: StampedeSession, now: number, elapsed: number, phas
   }
 }
 
+/** When a race's wave just finished (this tick) and it froze in a fresh `nextObstacleAt`, this
+ * often re-targets that value to line up with another currently-idle race's own upcoming spawn
+ * (still exactly one obstacle per race — only the TIMING is shared, never the obstacle itself) —
+ * see CLUSTER_CHANCE. `justResolvedIdx` are the indices of races whose wave resolved this tick;
+ * only those get re-targeted, so an already-scheduled race isn't yanked around on a later tick. */
+function applyObstacleClustering(races: RaceInstance[], justResolvedIdx: number[], now: number): void {
+  for (const i of justResolvedIdx) {
+    if (Math.random() >= CLUSTER_CHANCE) continue;
+    const race = races[i]!;
+    let anchor: RaceInstance | null = null;
+    for (let j = 0; j < races.length; j++) {
+      if (j === i) continue;
+      const other = races[j]!;
+      if (other.obstacles.length > 0 || other.pendingSecondObstacleAt !== null) continue;
+      if (other.nextObstacleAt <= now || other.nextObstacleAt - now > CLUSTER_WINDOW_MS) continue;
+      if (!anchor || other.nextObstacleAt < anchor.nextObstacleAt) anchor = other;
+    }
+    if (anchor) {
+      race.nextObstacleAt = anchor.nextObstacleAt + (Math.random() * 2 - 1) * CLUSTER_STAGGER_MAX_MS;
+    }
+  }
+}
+
 /** `humanJumpRequests[i]` is true only on the tick a click routed to band i (see main.ts) — one
  * flag per currently-active race, same length as `session.races`. */
 export function updateStampedeSession(session: StampedeSession, dt: number, now: number, humanJumpRequests: boolean[]): void {
   if (session.phase === "RESULTS") return;
 
   const suppressSpawns = session.pendingSplitAt !== null;
+  const justResolvedIdx: number[] = [];
   for (let i = 0; i < session.races.length; i++) {
-    updateRace(session.races[i]!, dt, now, humanJumpRequests[i] ?? false, suppressSpawns);
+    const race = session.races[i]!;
+    const wasPending = race.waveResolutionPending;
+    updateRace(race, dt, now, humanJumpRequests[i] ?? false, suppressSpawns);
+    if (wasPending && !race.waveResolutionPending) justResolvedIdx.push(i);
   }
+  if (!suppressSpawns && session.races.length > 1) applyObstacleClustering(session.races, justResolvedIdx, now);
 
   const elapsed = now - session.phaseEnteredAt;
   if (session.phase === "SINGLE") {
