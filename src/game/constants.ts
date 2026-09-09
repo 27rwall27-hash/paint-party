@@ -5,7 +5,7 @@ export const CANVAS_H = 720;
 // the curtain to fully mask it) and Player.ts (keeping players from wandering behind it).
 export const FRAME_THICKNESS = 44;
 
-export type PowerupType = "shrink" | "sweep" | "machinegun" | "clear" | "eraser" | "bigshot" | "confuse";
+export type PowerupType = "shrink" | "sweep" | "machinegun" | "clear" | "eraser" | "bigshot" | "confuse" | "speedboost";
 
 export interface KeyBinding {
   up: string;
@@ -81,7 +81,7 @@ export const FINAL_BURST_COUNT = 4;
 // round. Linear, not compounding: at level N the multiplier is (1 + N * FINALE_INTENSITY_STEP_PCT)
 // on top of the round's own normal per-round tempo bump, not repeated multiplication.
 export const FINALE_INTENSITY_INTERVAL_MS = 1000;
-export const FINALE_INTENSITY_STEP_PCT = 0.005;
+export const FINALE_INTENSITY_STEP_PCT = 0.0025;
 
 export const SHRINK_MULTIPLIER = 0.4;
 export const SHRINK_DURATION_MS = 6000;
@@ -89,6 +89,10 @@ export const MACHINEGUN_DURATION_MS = 5000;
 export const SWEEP_DURATION_MS = 1500;
 export const SWEEP_WIDTH = 46;
 export const SWEEP_BAND_HEIGHT = Math.round(CANVAS_H * 0.2);
+
+// A self-buff that just makes the claimer move faster — nothing else in the roster touches speed.
+export const SPEED_BOOST_MULTIPLIER = 1.6;
+export const SPEED_BOOST_DURATION_MS = 5000;
 
 export const POWERUP_CLAIMED_FLASH_MS = 500;
 export const POWERUP_PULSE_PERIOD_MS = 900; // continuous "notice me" pulse for as long as it's on screen
@@ -183,6 +187,7 @@ export const POWERUP_LABELS: Record<PowerupType, string> = {
   eraser: "Random Eraser",
   bigshot: "Big Shot",
   confuse: "Confusion",
+  speedboost: "Turbo Boost",
 };
 
 export const POWERUP_ICONS: Record<PowerupType, string> = {
@@ -193,6 +198,16 @@ export const POWERUP_ICONS: Record<PowerupType, string> = {
   eraser: "◌",
   bigshot: "◉",
   confuse: "↯",
+  speedboost: "⚡",
 };
 
-export const POWERUP_TYPES: PowerupType[] = ["shrink", "sweep", "machinegun", "clear", "eraser", "bigshot", "confuse"];
+export const POWERUP_TYPES: PowerupType[] = [
+  "shrink",
+  "sweep",
+  "machinegun",
+  "clear",
+  "eraser",
+  "bigshot",
+  "confuse",
+  "speedboost",
+];

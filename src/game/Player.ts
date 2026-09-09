@@ -8,6 +8,7 @@ import {
   MIN_RADIUS,
   MOVE_SPEED,
   PLAYER_DEFS,
+  SPEED_BOOST_MULTIPLIER,
 } from "./constants.ts";
 import type { PlayerInputState } from "./Input.ts";
 
@@ -32,6 +33,8 @@ export interface Player {
   confusedUntil: number;
   confusedAngle: number;
   confusedAngleSetAt: number;
+  /** Timestamp (ms) until which move speed is multiplied by SPEED_BOOST_MULTIPLIER. */
+  speedBoostUntil: number;
 }
 
 const START_POSITIONS: Array<[number, number]> = [
@@ -60,6 +63,7 @@ export function createPlayers(): Player[] {
       confusedUntil: 0,
       confusedAngle: 0,
       confusedAngleSetAt: 0,
+      speedBoostUntil: 0,
     };
   });
 }
@@ -77,6 +81,7 @@ export function resetForRound(players: Player[]): void {
     p.bigShotPending = false;
     p.confusedUntil = 0;
     p.confusedAngleSetAt = 0;
+    p.speedBoostUntil = 0;
   });
 }
 
@@ -110,9 +115,10 @@ export function updatePlayer(
     if (input.right) dx += 1;
   }
   if (dx !== 0 || dy !== 0) {
+    const speed = now < player.speedBoostUntil ? MOVE_SPEED * SPEED_BOOST_MULTIPLIER : MOVE_SPEED;
     const len = Math.hypot(dx, dy);
-    player.x += (dx / len) * MOVE_SPEED * dt;
-    player.y += (dy / len) * MOVE_SPEED * dt;
+    player.x += (dx / len) * speed * dt;
+    player.y += (dy / len) * speed * dt;
     // Clamped to the picture frame's inner edge, not the raw canvas edge, so players can't wander
     // behind the frame border — applies to confused movement too, since it's the same code path.
     player.x = Math.max(FRAME_THICKNESS, Math.min(CANVAS_W - FRAME_THICKNESS, player.x));

@@ -71,15 +71,18 @@ export function startMusic(): void {
 }
 
 /**
- * Call once per round (0-indexed) — each round is 8% faster than the last, compounding. Pitch is
- * always reset to normal here (only the finale's escalating panic ramp below ever touches it), so
- * every new round starts from a clean baseline even after a previous finale ramped pitch up.
+ * Call once per round (0-indexed) — each round is 8% faster than the last, compounding. Pitch
+ * preservation is set here based on whether this is the finale, not left for the ramp below to
+ * flip mid-round: toggling a playing <audio> element's preservesPitch switches which resampling
+ * algorithm the browser uses, which caused an audible glitch/shift the first time the finale's
+ * ramp kicked in. Pre-engaging it now (during the finale's own round-intro silence) means the
+ * first real ramp tick is just a plain, glitch-free rate nudge like every one after it.
  */
-export function setRoundSpeed(roundIndex: number): void {
+export function setRoundSpeed(roundIndex: number, isFinale: boolean): void {
   const multiplier = 1.08 ** roundIndex;
   roundSpeedMultiplier = multiplier;
   if (custom.music) {
-    custom.music.preservesPitch = true;
+    custom.music.preservesPitch = !isFinale;
     custom.music.playbackRate = multiplier;
   } else {
     audio.setTempoMultiplier(multiplier);
@@ -90,13 +93,12 @@ export function setRoundSpeed(roundIndex: number): void {
 /** Finale-only: called every FINALE_INTENSITY_INTERVAL_MS with an incrementing level — ramps
  * tempo AND pitch together on top of the round's own baseline speed (level 0 == baseline, no
  * pitch shift yet), for a "speeding up" panic effect as the last round wears on. Linear, not
- * compounding — level 40 is +20% (40 * 0.5%), not 1.005^40. */
+ * compounding — level 40 is +10% (40 * 0.25%), not 1.0025^40. preservesPitch is already set to
+ * false for the whole finale by setRoundSpeed above, so this never has to touch it mid-round. */
 export function setFinaleIntensity(level: number): void {
   const multiplier = roundSpeedMultiplier * (1 + level * FINALE_INTENSITY_STEP_PCT);
-  if (custom.music) {
-    custom.music.preservesPitch = false;
-    custom.music.playbackRate = multiplier;
-  } else {
+  if (custom.music) custom.music.playbackRate = multiplier;
+  else {
     audio.setTempoMultiplier(multiplier);
     audio.setPitchMultiplier(multiplier);
   }

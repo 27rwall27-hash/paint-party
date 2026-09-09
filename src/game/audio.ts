@@ -143,7 +143,7 @@ export function playPointReveal(rank: 0 | 1 | 2): void {
 
 /** Short countdown tick — plays once per second in the closing seconds of a round. */
 export function playTick(): void {
-  tone(1500, 0, 0.06, "square", 0.308); // was 0.22 — +40%
+  tone(1500, 0, 0.06, "square", 0.385); // was 0.22 -> 0.308 (+40%) -> 0.385 (+25% more)
 }
 
 export function playCurtain(): void {

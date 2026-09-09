@@ -41,6 +41,7 @@ import {
   ROUND_INTRO_MS,
   ROUND_NUMBER_MS,
   SHRINK_DURATION_MS,
+  SPEED_BOOST_DURATION_MS,
   SPLAT_INTERVAL_MS,
   SWEEP_BAND_HEIGHT,
   SWEEP_DURATION_MS,
@@ -81,7 +82,7 @@ export interface SoundHooks {
   /** A full-charge Big Shot landing — bigger and more dramatic than a regular splat. */
   playKaboom(): void;
   playClaim(): void;
-  setRoundSpeed(roundIndex: number): void;
+  setRoundSpeed(roundIndex: number, isFinale: boolean): void;
   /** Finale-only: level increments every FINALE_INTENSITY_INTERVAL_MS spent playing that round —
    * ramps tempo and pitch together on top of the round's own baseline speed. */
   setFinaleIntensity(level: number): void;
@@ -375,13 +376,14 @@ export class GameSession {
     this.curtainSoundPlayed = false;
     this.finaleIntensityLevel = 0;
     this.sound.setUrgent(false);
-    this.sound.setRoundSpeed(index);
+    this.sound.setRoundSpeed(index, index === ROUNDS.length - 1);
   }
 
   private updatePlaying(dt: number, now: number, input: InputSource): void {
     // Cursors are frozen for the first stretch of a round — right through the "START!" flash —
-    // so it actually registers before anyone can react. Paint charging still works; only movement
-    // is held back, and only for the movement/clamp step inside updatePlayer.
+    // so it actually registers before anyone can react. Charging is locked right along with
+    // movement (both go through the same neutered input below), so there's no way to get a head
+    // start on a shot before you're even allowed to move.
     const moveLocked = now - this.stateEnteredAt < MOVE_LOCK_MS;
 
     // Finale-only panic ramp: every FINALE_INTENSITY_INTERVAL_MS spent actually playing the last
@@ -399,7 +401,7 @@ export class GameSession {
       const mgActive = isMachineGunActive(player, now);
       updatePlayer(
         player,
-        moveLocked ? { ...playerInput, up: false, down: false, left: false, right: false } : playerInput,
+        moveLocked ? { ...playerInput, up: false, down: false, left: false, right: false, paint: false } : playerInput,
         dt,
         now,
       );
@@ -586,6 +588,9 @@ export class GameSession {
         for (const p of this.players) {
           if (p.id !== player.id) p.confusedUntil = now + CONFUSE_DURATION_MS;
         }
+        break;
+      case "speedboost":
+        player.speedBoostUntil = now + SPEED_BOOST_DURATION_MS;
         break;
     }
   }
