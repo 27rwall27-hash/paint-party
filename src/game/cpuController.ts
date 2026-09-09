@@ -60,6 +60,11 @@ const ALREADY_DOMINANT_PENALTY = 6000;
 // timer so a spraying bot keeps sweeping across real ground (and can bail out of an already-full
 // outline) instead of converging on one point and parking there for the whole power-up duration.
 const MACHINEGUN_REFRESH_MS = 350;
+// How strongly aim-point scoring discourages a candidate far from where the bot currently is,
+// relative to the outline's own radius (see pickScoredAim) — a distance RATIO, not raw pixels, so
+// the same weight naturally matters little on a small outline (the whole shape is a short walk
+// either way) and a lot on a huge one, without any per-shape tuning.
+const AIM_TRAVEL_PENALTY_SCALE = 2.2;
 // Minimum charge fraction the Confusion power-up's opportunistic fire (see decide()) will settle
 // for — without a floor here, a bot whose random drift carries it off an outline moments after
 // starting to charge would release immediately, landing a nearly-worthless sliver of a splat.
@@ -256,15 +261,30 @@ function analyzeCoverage(outline: Outline, players: Player[], selfId: number, pe
 
 /** Samples several candidate aim points and picks whichever scores best against real coverage —
  * painting over the leader first, open space second, another opponent third, this bot's own
- * already-claimed paint last (see AIM_SCORE). Every candidate is rejection-sampled against the
- * outline's real shape (jitterAimInside), not just its bounding circle, so a thin or irregular
- * silhouette can't end up scoring and picking a point that would actually land zero paint. */
-function pickScoredAim(outline: Outline, coverage: ReturnType<typeof analyzeCoverage>, cx: number, cy: number, radius: number): { x: number; y: number } {
+ * already-claimed paint last (see AIM_SCORE) — MINUS a penalty for how far that candidate is from
+ * (fromX, fromY), scaled by the outline's own radius. Without this, candidates are picked purely
+ * on coverage with zero regard for where the bot currently is: invisible on a small outline (the
+ * whole shape is a short walk from anywhere in it) but a real problem on one big enough that a
+ * "slightly better" spot on the far side costs several seconds of pure travel to reach — which is
+ * exactly lost firing time, most punishing on the single-giant-outline round where there's nowhere
+ * closer to go instead. Every candidate is rejection-sampled against the outline's real shape
+ * (jitterAimInside), not just its bounding circle, so a thin or irregular silhouette can't end up
+ * scoring and picking a point that would actually land zero paint. */
+function pickScoredAim(
+  outline: Outline,
+  coverage: ReturnType<typeof analyzeCoverage>,
+  cx: number,
+  cy: number,
+  radius: number,
+  fromX: number,
+  fromY: number,
+): { x: number; y: number } {
   let best = jitterAimInside(outline, cx, cy, radius);
   let bestScore = -Infinity;
   for (let i = 0; i < AIM_CANDIDATES; i++) {
     const candidate = jitterAimInside(outline, cx, cy, radius);
-    const score = AIM_SCORE[coverage.classify(candidate.x, candidate.y)] + Math.random() * 0.1;
+    const travelRatio = Math.hypot(candidate.x - fromX, candidate.y - fromY) / Math.max(1, radius);
+    const score = AIM_SCORE[coverage.classify(candidate.x, candidate.y)] - travelRatio * AIM_TRAVEL_PENALTY_SCALE + Math.random() * 0.1;
     if (score > bestScore) {
       bestScore = score;
       best = candidate;
@@ -439,7 +459,7 @@ export class CpuController {
       bot.retargetAt = now; // nothing left worth aiming for here — move on right away
       return;
     }
-    const aim = pickScoredAim(outline, coverage, bot.centerX, bot.centerY, bot.targetRadius);
+    const aim = pickScoredAim(outline, coverage, bot.centerX, bot.centerY, bot.targetRadius, player.x, player.y);
     bot.targetX = aim.x;
     bot.targetY = aim.y;
   }
@@ -545,7 +565,9 @@ export class CpuController {
     // boundingRadius, not the raw `radius` field — a rectangle-kind outline (the single-shape
     // "big one" round) sizes itself from width/height and has radius: 0.
     const radius = best.o.boundingRadius;
-    const aim = bestCoverage ? pickScoredAim(best.o, bestCoverage, best.o.cx, best.o.cy, radius) : jitterAimInside(best.o, best.o.cx, best.o.cy, radius);
+    const aim = bestCoverage
+      ? pickScoredAim(best.o, bestCoverage, best.o.cx, best.o.cy, radius, player.x, player.y)
+      : jitterAimInside(best.o, best.o.cx, best.o.cy, radius);
     return makeState(best.o.cx, best.o.cy, radius, false, best.i, aim);
   }
 }
