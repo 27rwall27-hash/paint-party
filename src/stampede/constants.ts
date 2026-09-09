@@ -76,10 +76,12 @@ export const PHASE_BASE_COLUMN_GAP_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY"
 };
 // A race's own lead-in/column-gap shrink linearly over its first RACE_RAMP_MS of life, then hold
 // at the floor — so a long-lived continuing race (top/middle band) still gets meaningfully harder
-// over time, not just at phase boundaries.
-export const RACE_RAMP_MS = 20_000;
-export const RACE_RAMP_LEAD_IN_FLOOR_MS = 1400;
-export const RACE_RAMP_COLUMN_GAP_FLOOR_MS = 100;
+// over time, not just at phase boundaries. Ramps faster and to a tighter floor than the first pass
+// did — staying comfortably in 1st for a while was feeling too easy, and this is the lever that
+// specifically punishes that (rather than a second simultaneous obstacle, which read as too hard).
+export const RACE_RAMP_MS = 14_000;
+export const RACE_RAMP_LEAD_IN_FLOOR_MS = 1100;
+export const RACE_RAMP_COLUMN_GAP_FLOOR_MS = 75;
 
 // Gap between one wave fully clearing the last column and the next wave spawning.
 export const PHASE_BASE_SPAWN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", number> = {
@@ -87,7 +89,7 @@ export const PHASE_BASE_SPAWN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", num
   TWO_WAY: 700,
   THREE_WAY: 500,
 };
-export const RACE_RAMP_SPAWN_FLOOR_MS = 350;
+export const RACE_RAMP_SPAWN_FLOOR_MS = 280;
 // Each spawn gap is jittered by +/- this fraction. Without ANY randomness here, once two or more
 // races have both fully ramped to their floor pacing their obstacle cycles become perfectly fixed
 // periods with a FIXED relative phase to each other — if that phase never happens to put both
@@ -97,11 +99,11 @@ export const RACE_RAMP_SPAWN_FLOOR_MS = 350;
 // instead of frozen, so an overlapping "both clear" moment is guaranteed eventually.
 export const SPAWN_INTERVAL_JITTER = 0.35;
 
-// Rare difficulty spike: when a new wave spawns, there's a small chance a SECOND obstacle also
-// joins it (staggered a bit behind the first, not simultaneous — see RaceInstance), meaning
-// racers may need two well-timed jumps in quick succession instead of one. Kept deliberately
-// infrequent ("only very occasionally") rather than a core mechanic.
-export const MULTI_OBSTACLE_CHANCE = 0.16;
+// A second simultaneous obstacle was tried as a rare difficulty spike and turned out to feel too
+// hard rather than "occasionally spicy" — back to a single obstacle per wave, always. Left at 0
+// (rather than ripping out the RaceInstance.obstacles[] plumbing) so the wave/multi-obstacle
+// machinery stays available to dial back up later without another rewrite.
+export const MULTI_OBSTACLE_CHANCE = 0;
 export const MULTI_OBSTACLE_STAGGER_MIN_MS = 350;
 export const MULTI_OBSTACLE_STAGGER_MAX_MS = 750;
 

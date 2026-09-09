@@ -47,12 +47,11 @@ function bandRect(index: number, bandCount: number): { y: number; h: number } {
   return { y, h };
 }
 
-/** A warm sunset scene (gradient sky, a low sun, a distant ship silhouette, and a soft dune-toned
- * ground) — a fixed backdrop rather than something that scrolls, since the obstacle's own motion
- * already carries the sense of movement. Drawn fresh per band so 2-3 stacked bands each get their
- * own full scene rather than sharing one cropped image. `now` still drives a slow horizontal drift
- * on the ship for a touch of life. */
-function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number, now: number, horizonY: number): void {
+/** A warm sunset scene (gradient sky, a low sun, and a flat ground) — a fixed backdrop rather than
+ * something that scrolls, since the obstacle's own motion already carries the sense of movement.
+ * Drawn fresh per band so 2-3 stacked bands each get their own full scene rather than sharing one
+ * cropped image. */
+function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number, horizonY: number): void {
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, y, CANVAS_W, h);
@@ -73,32 +72,9 @@ function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number,
   ctx.fillStyle = "#fbecc2";
   ctx.fill();
 
-  // A slow-drifting ship silhouette out on the water.
-  const shipDriftPx = 18;
-  const shipX = CANVAS_W * 0.82 + Math.sin(now / 9000) * shipDriftPx;
-  const shipScale = Math.max(0.5, Math.min(1, h / 220));
-  ctx.fillStyle = "#5b2317";
-  ctx.beginPath();
-  ctx.moveTo(shipX - 70 * shipScale, horizonY);
-  ctx.lineTo(shipX + 70 * shipScale, horizonY);
-  ctx.lineTo(shipX + 58 * shipScale, horizonY - 9 * shipScale);
-  ctx.lineTo(shipX - 58 * shipScale, horizonY - 9 * shipScale);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillRect(shipX - 14 * shipScale, horizonY - 26 * shipScale, 30 * shipScale, 17 * shipScale);
-  ctx.fillRect(shipX - 4 * shipScale, horizonY - 36 * shipScale, 6 * shipScale, 10 * shipScale);
-
-  // Ground below the horizon, with a couple of soft dune/wave arcs for texture.
+  // Flat ground below the horizon — a plain straight boundary, no texture.
   ctx.fillStyle = "#f0c48a";
   ctx.fillRect(0, horizonY, CANVAS_W, Math.max(0, y + h - horizonY));
-  ctx.fillStyle = "rgba(214, 149, 92, 0.45)";
-  const duneH = Math.max(10, h * 0.05);
-  for (let i = -1; i < 5; i++) {
-    const cx = i * 320 + 140;
-    ctx.beginPath();
-    ctx.ellipse(cx, horizonY + duneH * 0.4, 220, duneH, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
 
   ctx.restore();
 }
@@ -199,16 +175,22 @@ function drawStickFigure(
     }
 
     for (const armPhase of [phase + Math.PI, phase]) {
-      // Opposite the same-index leg above, like a real running gait.
+      // Opposite the same-index leg above, like a real running gait. Three bones (shoulder-elbow,
+      // elbow-wrist, wrist-hand), all driven off the SAME swing value for both axes (unlike the
+      // legs' separate swing/lift terms) so the hand only ever rises near the peak of its forward
+      // swing, where it's already well clear of the head sideways — an earlier version lifted the
+      // hand straight up at zero horizontal offset and it vanished behind the head circle.
       const swing = Math.sin(armPhase);
-      const pump = Math.max(0, Math.cos(armPhase));
-      const handX = footX + swing * armLen * 0.5;
-      const handY = shoulderY + armLen * 0.55 - pump * armLen * 1.05;
-      const elbowX = footX + swing * armLen * 0.28;
-      const elbowY = shoulderY + armLen * 0.32 - pump * armLen * 0.55;
+      const elbowX = footX + swing * armLen * 0.22;
+      const elbowY = shoulderY + armLen * 0.3 - swing * armLen * 0.18;
+      const wristX = footX + swing * armLen * 0.4;
+      const wristY = shoulderY + armLen * 0.5 - swing * armLen * 0.42;
+      const handX = footX + swing * armLen * 0.55;
+      const handY = shoulderY + armLen * 0.62 - swing * armLen * 0.68;
       ctx.beginPath();
       ctx.moveTo(footX, shoulderY);
       ctx.lineTo(elbowX, elbowY);
+      ctx.lineTo(wristX, wristY);
       ctx.lineTo(handX, handY);
       ctx.stroke();
     }
@@ -249,7 +231,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   // (head + torso + legs) needs more total vertical room than a circle alone did.
   const headRadius = radius * 0.55;
 
-  drawBandBackground(ctx, y, h, now, groundLineY);
+  drawBandBackground(ctx, y, h, groundLineY);
 
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.beginPath();
