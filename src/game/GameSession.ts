@@ -42,7 +42,6 @@ import {
   ROUND_INTRO_MS,
   ROUND_NUMBER_MS,
   SHRINK_DURATION_MS,
-  SPEED_BOOST_DURATION_MS,
   SPLAT_INTERVAL_MS,
   SWEEP_BAND_HEIGHT,
   SWEEP_DURATION_MS,
@@ -595,9 +594,6 @@ export class GameSession {
         for (const p of this.players) {
           if (p.id !== player.id) p.confusedUntil = now + CONFUSE_DURATION_MS;
         }
-        break;
-      case "speedboost":
-        player.speedBoostUntil = now + SPEED_BOOST_DURATION_MS;
         break;
     }
   }

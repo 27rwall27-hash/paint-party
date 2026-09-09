@@ -471,20 +471,6 @@ function drawCursors(ctx: CanvasRenderingContext2D, session: GameSession, now: n
   for (const player of session.players) {
     const maxR = currentMaxRadius(player, now);
 
-    if (now < player.speedBoostUntil) {
-      // A fast-pulsing electric ring around the cursor while boosted — purely a function of
-      // elapsed time, same pattern as every other animated effect in this file.
-      const pulse = 0.5 + 0.5 * Math.sin(now / 60);
-      ctx.save();
-      ctx.globalAlpha = 0.35 + 0.35 * pulse;
-      ctx.strokeStyle = "#ffe066";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(player.x, player.y, maxR + 6 + pulse * 4, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
     ctx.save();
     ctx.strokeStyle = player.color;
     ctx.globalAlpha = 0.4;
@@ -527,10 +513,6 @@ function drawCursors(ctx: CanvasRenderingContext2D, session: GameSession, now: n
     if (player.bigShotPending) {
       ctx.fillStyle = "#e6a63c";
       ctx.fillText("big shot ready", player.x, player.y - maxR - 24);
-    }
-    if (now < player.speedBoostUntil) {
-      ctx.fillStyle = "#c9a400";
-      ctx.fillText("⚡ turbo", player.x, player.y + maxR + 48);
     }
   }
 }

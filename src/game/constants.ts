@@ -5,7 +5,7 @@ export const CANVAS_H = 720;
 // the curtain to fully mask it) and Player.ts (keeping players from wandering behind it).
 export const FRAME_THICKNESS = 44;
 
-export type PowerupType = "shrink" | "sweep" | "machinegun" | "clear" | "eraser" | "bigshot" | "confuse" | "speedboost";
+export type PowerupType = "shrink" | "sweep" | "machinegun" | "clear" | "eraser" | "bigshot" | "confuse";
 
 export interface KeyBinding {
   up: string;
@@ -92,10 +92,6 @@ export const MACHINEGUN_DURATION_MS = 5000;
 export const SWEEP_DURATION_MS = 1500;
 export const SWEEP_WIDTH = 46;
 export const SWEEP_BAND_HEIGHT = Math.round(CANVAS_H * 0.2);
-
-// A self-buff that just makes the claimer move faster — nothing else in the roster touches speed.
-export const SPEED_BOOST_MULTIPLIER = 1.6;
-export const SPEED_BOOST_DURATION_MS = 5000;
 
 export const POWERUP_CLAIMED_FLASH_MS = 500;
 export const POWERUP_PULSE_PERIOD_MS = 900; // continuous "notice me" pulse for as long as it's on screen
@@ -190,7 +186,6 @@ export const POWERUP_LABELS: Record<PowerupType, string> = {
   eraser: "Random Eraser",
   bigshot: "Big Shot",
   confuse: "Confusion",
-  speedboost: "Turbo Boost",
 };
 
 export const POWERUP_ICONS: Record<PowerupType, string> = {
@@ -201,16 +196,6 @@ export const POWERUP_ICONS: Record<PowerupType, string> = {
   eraser: "◌",
   bigshot: "◉",
   confuse: "↯",
-  speedboost: "⚡",
 };
 
-export const POWERUP_TYPES: PowerupType[] = [
-  "shrink",
-  "sweep",
-  "machinegun",
-  "clear",
-  "eraser",
-  "bigshot",
-  "confuse",
-  "speedboost",
-];
+export const POWERUP_TYPES: PowerupType[] = ["shrink", "sweep", "machinegun", "clear", "eraser", "bigshot", "confuse"];

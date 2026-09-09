@@ -6,13 +6,15 @@ import * as sound from "./game/sound.ts";
 import { initOnlineUI } from "./game/onlineUI.ts";
 import { onlineMode, onlineNow } from "./game/onlineMode.ts";
 import { initPlayerSetupUI } from "./game/playerSetupUI.ts";
-import { PLAYER_DEFS } from "./game/constants.ts";
+import { MOVE_LOCK_MS, PLAYER_DEFS } from "./game/constants.ts";
+import type { PlayerInputState } from "./game/Input.ts";
 
 sound.init();
 initOnlineUI();
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
 const ctx = canvas.getContext("2d")!;
+const NEUTRAL_INPUT: PlayerInputState = { up: false, down: false, left: false, right: false, paint: false };
 
 const input = new InputManager();
 const session = new GameSession(sound);
@@ -39,7 +41,20 @@ function loop(time: number): void {
       const localInput = input.getInput(PLAYER_DEFS[0]!.keys);
       const mySlot = onlineMode.mySlot;
       if (mySlot !== undefined && onlineMode.predictedPlayer && onlineMode.lastAuthoritativePlayer) {
-        const predicted = onlineMode.predictedPlayer.update(onlineMode.lastAuthoritativePlayer, localInput, now);
+        // PredictedPlayer has no idea what state the game is in — it'll happily predict movement/
+        // charging from raw key state regardless. The host only ever actually applies movement
+        // during PLAYING, and even then not until MOVE_LOCK_MS after it starts — outside that
+        // window a guest holding a key would predict themselves drifting away from their real
+        // (unmoved, host-authoritative) position, then get visibly snapped back once a real
+        // snapshot/reconcile catches up. Feeding it a neutral input outside that window keeps the
+        // prediction pinned to the authoritative position instead, exactly matching the host.
+        const canPredictMovement =
+          onlineMode.session.state === "PLAYING" && now - onlineMode.session.stateEnteredAt >= MOVE_LOCK_MS;
+        const predicted = onlineMode.predictedPlayer.update(
+          onlineMode.lastAuthoritativePlayer,
+          canPredictMovement ? localInput : NEUTRAL_INPUT,
+          now,
+        );
         onlineMode.session.players[mySlot] = predicted;
       }
       if (onlineMode.interpolator) {
