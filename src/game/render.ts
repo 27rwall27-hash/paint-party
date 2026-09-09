@@ -207,12 +207,12 @@ function drawOutlines(ctx: CanvasRenderingContext2D, session: GameSession): void
 function drawPowerupAura(ctx: CanvasRenderingContext2D, p: Powerup, now: number): void {
   const t = (now - p.spawnedAt) / POWERUP_AURA_MS;
   if (t < 0 || t >= 1) return;
-  const radius = p.radius * (1 + t * 1.8);
+  const radius = p.radius * (1 + t * 1.8) * 1.3; // 30% bigger
   const alpha = (1 - t) * 0.7;
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.strokeStyle = "#fff9d6";
+  ctx.strokeStyle = "#39ff6a"; // bright green — was a pale yellow, hard to notice
   ctx.lineWidth = 4 * (1 - t) + 1;
   ctx.beginPath();
   ctx.arc(p.cx, p.cy, radius, 0, Math.PI * 2);

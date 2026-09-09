@@ -13,12 +13,24 @@ interface InterpState {
   correctStartAt: number;
 }
 
-// Never extrapolate further than this past the last real update — a genuine network stall
-// (dropped connection, backgrounded tab) shouldn't send a player careening off in a straight line
-// forever; better to just hold the last known position.
-const MAX_EXTRAPOLATE_MS = 150;
+// Positions broadcast every host tick (~33ms), so under normal conditions a fresh update always
+// lands well inside this window — full velocity is trusted the whole time here, so ordinary
+// continuous movement is never held back or lagged by the decay below.
+const FULL_TRUST_MS = 45;
+// Past FULL_TRUST_MS (an update running late — network jitter, a congested tick, ...), the
+// extrapolated distance tapers down to zero by this point instead of coasting at full velocity
+// indefinitely. A player who was moving and then stops dead (the common "move up to a target,
+// stop, charge, fire" pattern) has zero *new* velocity the instant they stop, but that only
+// becomes known once the next update lands; if it's delayed, decaying the stale velocity's
+// contribution avoids projecting them further and further past where they actually stopped.
+const MAX_EXTRAPOLATE_MS = 120;
 // How long a misprediction correction takes to fully blend in, rather than snapping instantly.
-const CORRECTION_MS = 80;
+// Deliberately shorter than the normal ~33ms update interval — a value longer than that (80ms,
+// the original choice here) means a correction from one update is still only partly blended in by
+// the time the *next* update already wants to start a new correction, which never fully resolves
+// and instead compounds into a steady lag behind the true position for as long as a player keeps
+// moving continuously — exactly the case that's supposed to need no smoothing help at all.
+const CORRECTION_MS = 20;
 
 /** Smooths remote (non-locally-controlled) players' movement between position updates — a
  * lighter-weight complement to PredictedPlayer, which only applies to the guest's own player.
@@ -64,8 +76,13 @@ export class RemoteInterpolator {
     if (!s) return undefined;
 
     const extrapolateMs = Math.max(0, Math.min(MAX_EXTRAPOLATE_MS, now - s.receivedAt));
-    const extrapolatedX = s.x + s.vx * (extrapolateMs / 1000);
-    const extrapolatedY = s.y + s.vy * (extrapolateMs / 1000);
+    // Full trust (decay=1) through FULL_TRUST_MS, then tapers linearly to 0 by MAX_EXTRAPOLATE_MS
+    // — see the comments above for why. Ordinary continuous movement never leaves the full-trust
+    // zone (a new update always arrives well before FULL_TRUST_MS under normal conditions), so
+    // this only ever softens a genuinely late/missing update, never routine steady-state motion.
+    const decay = extrapolateMs <= FULL_TRUST_MS ? 1 : 1 - (extrapolateMs - FULL_TRUST_MS) / (MAX_EXTRAPOLATE_MS - FULL_TRUST_MS);
+    const extrapolatedX = s.x + s.vx * (extrapolateMs / 1000) * decay;
+    const extrapolatedY = s.y + s.vy * (extrapolateMs / 1000) * decay;
 
     const correctionT = Math.max(0, Math.min(1, (now - s.correctStartAt) / CORRECTION_MS));
     return {
