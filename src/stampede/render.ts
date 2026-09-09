@@ -2,8 +2,6 @@ import {
   CANVAS_H,
   CANVAS_W,
   GROUND_Y_FRACTION,
-  JUMP_AIRTIME_MS,
-  JUMP_ARC_HEIGHT_PX,
   PACK_LEFT_FRACTION,
   PACK_WIDTH_FRACTION,
   POINTS_BY_RANK,
@@ -132,7 +130,7 @@ function drawStickFigure(
     // straight; one arm reaches forward (same side as the front leg), the other back (same side
     // as the back leg) — a dramatic "X" silhouette at the peak, easing in/out with jumpT (0 at
     // takeoff/landing, 1 at the peak) so it doesn't just pop into place.
-    const split = headRadius * (1.5 + 1.3 * jumpT);
+    const split = headRadius * (1.8 + 1.8 * jumpT);
     const frontFootX = footX + split;
     const frontFootY = footY - headRadius * 0.35 * jumpT;
     const backFootX = footX - split;
@@ -268,9 +266,9 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     let jumpT = 0;
     let jumpOffset = 0;
     if (airborne) {
-      const t = Math.min(1, Math.max(0, (now - racer.jumpStartedAt) / JUMP_AIRTIME_MS));
+      const t = Math.min(1, Math.max(0, (now - racer.jumpStartedAt) / racer.jumpAirtimeMs));
       jumpT = Math.sin(t * Math.PI); // 0 at takeoff/landing, 1 at the peak — also drives the leap pose
-      jumpOffset = -jumpT * JUMP_ARC_HEIGHT_PX;
+      jumpOffset = -jumpT * racer.jumpArcHeightPx;
     }
     const footY = groundLineY + jumpOffset;
 

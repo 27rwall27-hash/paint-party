@@ -2,7 +2,10 @@ import {
   CPU_BASE_SKILL_MAX,
   CPU_BASE_SKILL_MIN,
   CPU_SKILL_JITTER,
-  JUMP_AIRTIME_MS,
+  JUMP_AIRTIME_FIRST_MS,
+  JUMP_AIRTIME_LAST_MS,
+  JUMP_ARC_HEIGHT_FIRST_PX,
+  JUMP_ARC_HEIGHT_LAST_PX,
   KNOCKOUT_FLY_SPEED_SLOTS_PER_SEC,
   KNOCKOUT_OFFSCREEN_SLOT,
   MULTI_OBSTACLE_CHANCE,
@@ -27,9 +30,15 @@ export interface RaceRacerState {
   identityId: number;
   /** 0 = not currently jumping. Otherwise the timestamp this racer's CURRENT jump started (which
    * may be in the future, for a CPU jump scheduled ahead of time — see updateRace) — airborne for
-   * JUMP_AIRTIME_MS starting from that instant. Use isAirborne() rather than reading this field
+   * jumpAirtimeMs starting from that instant. Use isAirborne() rather than reading this field
    * directly. */
   jumpStartedAt: number;
+  /** This jump's airtime/visual arc height, frozen from this racer's RANK at the moment the jump
+   * started (see jumpAirtimeMsForRank/jumpArcHeightPxForRank below) — 1st place gets the
+   * tightest/lowest jump, last place the most generous/highest. Frozen rather than recomputed live
+   * so a jump already in flight doesn't change shape if rank shifts under it. */
+  jumpAirtimeMs: number;
+  jumpArcHeightPx: number;
   /** This race's own roll for this identity — re-rolled fresh (jittered around a base skill) every
    * time a race is cloned, so the same identity can genuinely diverge across parallel races. */
   cpuSkill: number;
@@ -46,7 +55,20 @@ export interface RaceRacerState {
 }
 
 export function isAirborne(racer: RaceRacerState, now: number): boolean {
-  return racer.jumpStartedAt > 0 && now >= racer.jumpStartedAt && now < racer.jumpStartedAt + JUMP_AIRTIME_MS;
+  return racer.jumpStartedAt > 0 && now >= racer.jumpStartedAt && now < racer.jumpStartedAt + racer.jumpAirtimeMs;
+}
+
+/** Linearly interpolates rank 0 (1st place) → JUMP_AIRTIME_FIRST_MS through rank RACER_COUNT-1
+ * (last place) → JUMP_AIRTIME_LAST_MS. */
+export function jumpAirtimeMsForRank(rank: number): number {
+  const t = rank / (RACER_COUNT - 1);
+  return JUMP_AIRTIME_FIRST_MS + (JUMP_AIRTIME_LAST_MS - JUMP_AIRTIME_FIRST_MS) * t;
+}
+
+/** Same rank interpolation as jumpAirtimeMsForRank, for the visual leap height. */
+export function jumpArcHeightPxForRank(rank: number): number {
+  const t = rank / (RACER_COUNT - 1);
+  return JUMP_ARC_HEIGHT_FIRST_PX + (JUMP_ARC_HEIGHT_LAST_PX - JUMP_ARC_HEIGHT_FIRST_PX) * t;
 }
 
 export interface RaceObstacle {
@@ -132,6 +154,8 @@ export function createRaceInstance(order: RacerIdentity[], baseSkills: Map<numbe
     racers: order.map((identity, rank) => ({
       identityId: identity.id,
       jumpStartedAt: 0,
+      jumpAirtimeMs: jumpAirtimeMsForRank(rank),
+      jumpArcHeightPx: jumpArcHeightPxForRank(rank),
       cpuSkill: rollCpuSkill(baseSkills.get(identity.id) ?? CPU_BASE_SKILL_MIN),
       // Starts already in place — no slide-in animation on a fresh race/clone, only on later
       // rank changes.
@@ -174,7 +198,10 @@ function spawnObstacle(race: RaceInstance, now: number): RaceObstacle {
     const reachAt = reachTimeForRank(obstacle, rank);
     if (isAirborne(racer, reachAt)) return;
     if (Math.random() < racer.cpuSkill) {
-      racer.jumpStartedAt = reachAt - JUMP_AIRTIME_MS * 0.6;
+      const airtime = jumpAirtimeMsForRank(rank);
+      racer.jumpAirtimeMs = airtime;
+      racer.jumpArcHeightPx = jumpArcHeightPxForRank(rank);
+      racer.jumpStartedAt = reachAt - airtime * 0.6;
     }
   });
   return obstacle;
@@ -205,8 +232,11 @@ export function updateRace(race: RaceInstance, dt: number, now: number, humanJum
     race.pendingSecondObstacleAt = null;
   }
 
-  const human = race.racers.find((r) => r.identityId === 0);
+  const humanRank = race.racers.findIndex((r) => r.identityId === 0);
+  const human = humanRank !== -1 ? race.racers[humanRank] : undefined;
   if (human && humanJumpRequested && !isAirborne(human, now)) {
+    human.jumpAirtimeMs = jumpAirtimeMsForRank(humanRank);
+    human.jumpArcHeightPx = jumpArcHeightPxForRank(humanRank);
     human.jumpStartedAt = now;
   }
 

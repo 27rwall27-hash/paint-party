@@ -48,12 +48,17 @@ export const ABSOLUTE_MAX_SPLIT_WAIT_MS = 16_000;
 // are pure setup, no scoring.
 export const POINTS_BY_RANK: number[] = [10, 8, 6, 5, 4, 3, 1, 0];
 
-// How long a jump keeps a racer airborne (and thus safe from the current obstacle) once triggered
-// — 550 * 1.3, a deliberately generous tolerance bump so mistimed-but-close clicks/CPU jumps
-// still clear the obstacle more often.
-export const JUMP_AIRTIME_MS = 715;
-// A jump's upward arc peaks at this fraction of the way through its airtime.
-export const JUMP_ARC_HEIGHT_PX = 46;
+// How long a jump keeps a racer airborne (and thus safe from the current obstacle), and how high
+// the leap visually arcs — both now scale with RANK rather than being flat. 1st place gets the
+// tightest, least forgiving window and the lowest hop (a bit tighter than the old flat 715ms —
+// holding 1st shouldn't just mean faster/clustered obstacles, the jump itself needs to stay hard
+// too), while last place leaps dramatically higher and stays airborne much longer — falling behind
+// isn't just "more warning," it's also physically easier to clear the thing. See
+// jumpAirtimeMsForRank/jumpArcHeightPxForRank in RaceInstance.ts.
+export const JUMP_AIRTIME_FIRST_MS = 550;
+export const JUMP_AIRTIME_LAST_MS = 1050;
+export const JUMP_ARC_HEIGHT_FIRST_PX = 28;
+export const JUMP_ARC_HEIGHT_LAST_PX = 82;
 
 // ONE shared obstacle per race — not one per racer. It sweeps across the whole band once per
 // wave, right to left, so it reaches the current 1st place (rightmost column) almost immediately
