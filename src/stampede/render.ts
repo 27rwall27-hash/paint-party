@@ -45,49 +45,120 @@ function bandRect(index: number, bandCount: number): { y: number; h: number } {
   return { y, h };
 }
 
-/** A warm sunset scene (gradient sky, a low sun, and a flat ground) — a fixed backdrop rather than
- * something that scrolls, since the obstacle's own motion already carries the sense of movement.
- * Drawn fresh per band so 2-3 stacked bands each get their own full scene rather than sharing one
- * cropped image. */
-function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number, horizonY: number): void {
+// Each race gets its own terrain, keyed by race index (band 0 = the original race, band 1 = the
+// race born at the first split, band 2 = the race born at the second split) — same identity the
+// rest of the game already uses, so no new "which race is which" concept is needed. Only the
+// ground color differs between them; the sky and sun stay identical across all three (see
+// computeSunState) so it genuinely reads as the same sky over three different terrains, not three
+// unrelated scenes.
+const TERRAIN_GROUND_COLORS = ["#5f9a52", "#eec99a", "#d8e8ef"]; // grass, beach, ice
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const n = parseInt(hex.slice(1), 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+function lerpColor(hexA: string, hexB: string, t: number): string {
+  const a = hexToRgb(hexA);
+  const b = hexToRgb(hexB);
+  return `rgb(${Math.round(lerp(a.r, b.r, t))}, ${Math.round(lerp(a.g, b.g, t))}, ${Math.round(lerp(a.b, b.b, t))})`;
+}
+
+/** 0 (SINGLE phase just started) → 1 (THREE_WAY finished / RESULTS) — driven by PHASE progress
+ * rather than wall-clock time, so the sun reliably reaches full sunset by the time the game ends
+ * regardless of how long the variable pre-split quiet periods run. Each phase owns an even third
+ * of the arc; a pending-split quiet period just holds the sun at that phase's end position rather
+ * than overshooting. */
+function sessionProgress(session: StampedeSession, now: number): number {
+  const elapsed = now - session.phaseEnteredAt;
+  const withinPhase = (durationMs: number) => Math.min(1, Math.max(0, elapsed / durationMs));
+  if (session.phase === "SINGLE") return withinPhase(SINGLE_PHASE_MS) * (1 / 3);
+  if (session.phase === "TWO_WAY") return 1 / 3 + withinPhase(TWO_WAY_PHASE_MS) * (1 / 3);
+  if (session.phase === "THREE_WAY") return 2 / 3 + withinPhase(THREE_WAY_PHASE_MS) * (1 / 3);
+  return 1; // RESULTS
+}
+
+interface SunState {
+  /** Fraction of CANVAS_W — same for every band, since it's the same sun. */
+  xFrac: number;
+  /** Fraction of a band's OWN height — each band places the sun relative to its own sky, so a
+   * full-height SINGLE band and a third-height THREE_WAY band both show a complete, proportional
+   * scene from the same underlying sun state. */
+  yFrac: number;
+  sky: [string, string, string];
+  sunColor: string;
+}
+
+/** One sun, computed once per frame from overall game progress and handed to every band — a
+ * pale, high, top-right morning sun at the start of the game arcing down to the warm, low sunset
+ * position/palette by the end. */
+function computeSunState(t: number): SunState {
+  return {
+    xFrac: lerp(0.86, 0.24, t),
+    yFrac: lerp(0.12, 1.0, t),
+    sky: [lerpColor("#8fb8d9", "#b8380f", t), lerpColor("#f3c9a8", "#dd7233", t), lerpColor("#fdf1d9", "#f6c98a", t)],
+    sunColor: lerpColor("#fff6e0", "#fbecc2", t),
+  };
+}
+
+/** A gradient sky, one shared sun (see computeSunState), and a flat terrain-colored ground — a
+ * fixed backdrop rather than something that scrolls, since the obstacle's own motion already
+ * carries the sense of movement. Drawn fresh per band so 2-3 stacked bands each get their own full
+ * scene rather than sharing one cropped image. */
+function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number, horizonY: number, sun: SunState, groundColor: string): void {
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, y, CANVAS_W, h);
   ctx.clip();
 
   const sky = ctx.createLinearGradient(0, y, 0, horizonY);
-  sky.addColorStop(0, "#b8380f");
-  sky.addColorStop(0.55, "#dd7233");
-  sky.addColorStop(1, "#f6c98a");
+  sky.addColorStop(0, sun.sky[0]);
+  sky.addColorStop(0.55, sun.sky[1]);
+  sky.addColorStop(1, sun.sky[2]);
   ctx.fillStyle = sky;
   ctx.fillRect(0, y, CANVAS_W, Math.max(0, horizonY - y));
 
-  // Sun, resting on the horizon.
   const sunR = h * 0.24;
-  const sunX = CANVAS_W * 0.24;
   ctx.beginPath();
-  ctx.arc(sunX, horizonY, sunR, 0, Math.PI * 2);
-  ctx.fillStyle = "#fbecc2";
+  ctx.arc(CANVAS_W * sun.xFrac, y + h * sun.yFrac, sunR, 0, Math.PI * 2);
+  ctx.fillStyle = sun.sunColor;
   ctx.fill();
 
   // Flat ground below the horizon — a plain straight boundary, no texture.
-  ctx.fillStyle = "#f0c48a";
+  ctx.fillStyle = groundColor;
   ctx.fillRect(0, horizonY, CANVAS_W, Math.max(0, y + h - horizonY));
 
   ctx.restore();
 }
 
-/** A small triangular spike sitting on the ground line, tip up — placeholder obstacle shape.
- * `groundLineY` is where the ground line is actually DRAWN (groundY + radius + 4 in drawRace,
- * not groundY itself — groundY is the runners' own center point, a few px above their feet). */
-function drawSpike(ctx: CanvasRenderingContext2D, x: number, groundLineY: number, size: number): void {
+/** A track hurdle sitting on the ground line: two pale posts and a colored crossbar. `groundLineY`
+ * is where the ground line is actually DRAWN (groundY + radius + 4 in drawRace, not groundY itself
+ * — groundY is the runners' own center point, a few px above their feet). */
+function drawHurdle(ctx: CanvasRenderingContext2D, x: number, groundLineY: number, size: number): void {
+  const legHeight = size * 2.2;
+  const barY = groundLineY - legHeight;
+  const halfWidth = size * 0.9;
+
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#e8e2d8";
+  ctx.lineWidth = Math.max(2, size * 0.3);
+  for (const legX of [x - halfWidth, x + halfWidth]) {
+    ctx.beginPath();
+    ctx.moveTo(legX, groundLineY);
+    ctx.lineTo(legX, barY);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "#d94b3a";
+  ctx.lineWidth = Math.max(3, size * 0.42);
   ctx.beginPath();
-  ctx.moveTo(x, groundLineY - size * 1.8);
-  ctx.lineTo(x - size, groundLineY);
-  ctx.lineTo(x + size, groundLineY);
-  ctx.closePath();
-  ctx.fillStyle = "#8a6d3b";
-  ctx.fill();
+  ctx.moveTo(x - halfWidth, barY);
+  ctx.lineTo(x + halfWidth, barY);
+  ctx.stroke();
 }
 
 /** A stick figure with a colored head — sprinting hard in place (bent knees/elbows on a continuous
@@ -126,20 +197,19 @@ function drawStickFigure(
   ctx.stroke();
 
   if (jumping) {
-    // Grand-jeté split: front leg reaches forward, back leg trails backward, both nearly
-    // straight; one arm reaches forward (same side as the front leg), the other back (same side
-    // as the back leg) — a dramatic "X" silhouette at the peak, easing in/out with jumpT (0 at
-    // takeoff/landing, 1 at the peak) so it doesn't just pop into place.
-    const split = headRadius * (1.8 + 1.8 * jumpT);
-    const frontFootX = footX + split;
-    const frontFootY = footY - headRadius * 0.35 * jumpT;
-    const backFootX = footX - split;
-    const backFootY = footY + headRadius * 0.25;
+    // Grand-jeté split: front leg and back leg are mirrored straight through the hip — a true
+    // 180° split (a flat "needle" line through the pivot), not an asymmetric bend — growing wider
+    // as jumpT rises toward the peak; one arm reaches forward (same side as the front leg), the
+    // other back (same side as the back leg) — a dramatic "X" silhouette at the peak, easing
+    // in/out with jumpT (0 at takeoff/landing, 1 at the peak) so it doesn't just pop into place.
+    const legReach = headRadius * (2.0 + 2.4 * jumpT);
+    const frontFootX = footX + legReach;
+    const backFootX = footX - legReach;
     ctx.beginPath();
     ctx.moveTo(footX, hipY);
-    ctx.lineTo(frontFootX, frontFootY);
+    ctx.lineTo(frontFootX, hipY);
     ctx.moveTo(footX, hipY);
-    ctx.lineTo(backFootX, backFootY);
+    ctx.lineTo(backFootX, hipY);
     ctx.stroke();
 
     const reach = armLen * (1.0 + 0.6 * jumpT);
@@ -211,7 +281,7 @@ function drawStickFigure(
   ctx.stroke();
 }
 
-function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number): void {
+function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number, sun: SunState, groundColor: string): void {
   // The 8 racers cluster near the left of the band (not spread across its full width) — leaves a
   // long, clearly visible runway on the right where the obstacle is approaching from, and keeps
   // the pack itself tight.
@@ -221,7 +291,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   // One shared ground line for the whole band — every runner stands on it, every obstacle travels
   // along it (horizontally), and jumping is the only thing that moves a runner off of it, same
   // convention as the original endless-runner this is modeled on. Doubles as the background
-  // scene's horizon, so the sun/ship/dunes all line up with where characters actually stand.
+  // scene's horizon, so the sun lines up with where characters actually stand.
   const groundY = y + h * GROUND_Y_FRACTION;
   const radius = Math.min(colWidth * 0.28, 17);
   const groundLineY = groundY + radius + 4;
@@ -229,7 +299,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   // (head + torso + legs) needs more total vertical room than a circle alone did.
   const headRadius = radius * 0.55;
 
-  drawBandBackground(ctx, y, h, groundLineY);
+  drawBandBackground(ctx, y, h, groundLineY, sun, groundColor);
 
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.beginPath();
@@ -248,7 +318,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     const spawnX = CANVAS_W - 24;
     const targetX = slotX(0);
     const obstacleX = spawnX + progress * (targetX - spawnX);
-    drawSpike(ctx, obstacleX, groundLineY, Math.max(7, radius * 0.55));
+    drawHurdle(ctx, obstacleX, groundLineY, Math.max(7, radius * 0.55));
   }
 
   race.racers.forEach((racer, rank) => {
@@ -382,9 +452,11 @@ export function render(ctx: CanvasRenderingContext2D, session: StampedeSession, 
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   const identitiesById = new Map(session.identities.map((i) => [i.id, i]));
+  const sun = computeSunState(sessionProgress(session, now));
   session.races.forEach((race, i) => {
     const { y, h } = bandRect(i, session.races.length);
-    drawRace(ctx, race, identitiesById, y, h, now);
+    const groundColor = TERRAIN_GROUND_COLORS[i] ?? TERRAIN_GROUND_COLORS[TERRAIN_GROUND_COLORS.length - 1]!;
+    drawRace(ctx, race, identitiesById, y, h, now, sun, groundColor);
   });
 
   drawHud(ctx, session, now);

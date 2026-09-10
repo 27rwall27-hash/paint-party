@@ -21,7 +21,7 @@ export const CPU_NAME_PREFIX = "CPU";
 // Phase durations — mid-range of the user's given windows (35-45s, 35-45s, 25-30s). First-pass
 // estimates; expect these to need live-playtest tuning, same as every difficulty constant in
 // Paint Party's own CpuController did this session.
-export const SINGLE_PHASE_MS = 40_000;
+export const SINGLE_PHASE_MS = 20_000;
 export const TWO_WAY_PHASE_MS = 40_000;
 export const THREE_WAY_PHASE_MS = 27_000;
 
