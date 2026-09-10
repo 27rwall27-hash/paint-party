@@ -1,9 +1,10 @@
-export const CANVAS_W = 1400;
-export const CANVAS_H = 1480;
+export const CANVAS_W = 1300;
+export const CANVAS_H = 1150;
 export const HUD_HEIGHT = 60;
 
 export const PLAYER_COUNT = 4;
 export const GRID_SIZE = 5;
+export const TOTAL_ROOMS = GRID_SIZE * GRID_SIZE;
 export const MID_INDEX = 2; // the middle row/col index of a 5-wide grid — where each entrance sits
 
 // A small, distinct 4-color palette — copied (not imported) from the other games' own preset
@@ -39,16 +40,17 @@ export const CPU_MOVE_SPEED = 2.1;
 export const VESTIBULE_DEPTH = 0.85;
 export const VESTIBULE_LATERAL_CLAMP = 0.6;
 // How close (along the wall-facing axis, in room-units) a player must stand to actually attempt
-// opening the door they're facing — "right in front of it", not just anywhere in the room.
+// opening the nearest closed door — doesn't matter which way they're currently facing, just
+// proximity to the wall itself.
 export const DOOR_INTERACT_DISTANCE = 0.42;
 
 // --- Door swing animation ----------------------------------------------------------------------
-// Closed doors span (almost) the FULL wall, hinged at one corner — visually identical to a solid
-// wall whether real, fake, or (structurally still possible, just unused by mazeGen now)
-// unassigned. Opening swings the whole panel 90°, from flush along its own wall to flush along
-// the room's OTHER wall at that same corner — fully out of the passage and parallel to a wall the
-// entire time, at both ends of the swing.
-export const DOOR_LENGTH_FRACTION = 0.96;
+// Closed doors are a small SECTION of the wall (not the whole thing) — hinged at the corner they
+// share with the room's other wall, with the rest of that wall drawn as a plain, permanently solid
+// stub alongside it. Visually identical whether real or fake. Opening swings the door panel a
+// full 90°, from flush along its own wall to flush along the room's OTHER wall at that same corner
+// — fully out of the passage and parallel to a wall at both ends of the swing.
+export const DOOR_LENGTH_FRACTION = 0.42;
 export const DOOR_SWING_OPEN_MS = 320;
 export const DOOR_SWING_SHUT_MS = 900;
 // How long the small red "X" stays on screen after a failed (fake-door) open attempt.

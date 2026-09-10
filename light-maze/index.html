@@ -8,15 +8,15 @@
   <body>
     <div id="app">
       <a id="backToSuite" href="/">&larr; Suite</a>
-      <canvas id="maze" width="1280" height="720"></canvas>
+      <canvas id="maze" width="1300" height="1150"></canvas>
 
       <div id="setupPanel">
         <p class="settingsHint">
-          A 5x5 grid of rooms, one entrance per side. Move with WASD, click a closed door right in
-          front of you to try opening it — real doors open for good, but some are permanent dead
-          ends, so remember which ones failed. Color every room you enter, then get back out your
-          own entrance. The moment 3 of the 4 players are out, every door slams shut — whoever's
-          still inside loses.
+          A 5x5 grid of rooms, one entrance per side. Move freely with WASD, click near a closed
+          door to try opening it — real doors open for good, but some are permanent dead ends, so
+          remember which ones failed. Your own entrance won't let you back out until every room is
+          lit. The moment 3 of the 4 players are out, every door slams shut — whoever's still
+          inside loses.
         </p>
         <div class="settingsRow">
           <input id="playerNameInput" type="text" maxlength="12" placeholder="You" />

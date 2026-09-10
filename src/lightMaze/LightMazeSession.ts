@@ -13,6 +13,7 @@ import {
   FAILED_MARKER_MS,
   PLAYER_RADIUS,
   PLAYER_SPEED,
+  TOTAL_ROOMS,
   VESTIBULE_DEPTH,
   VESTIBULE_LATERAL_CLAMP,
 } from "./constants.ts";
@@ -27,6 +28,7 @@ import {
   neighborRoom,
   oppositeSide,
   outsideStartPos,
+  SIDES,
   type MazeGrid,
   type Position,
   type Quadrant,
@@ -193,7 +195,10 @@ function clampAxis(session: LightMazeSession, player: PlayerState, axis: "row" |
   const dir: Side = axis === "row" ? (delta > 0 ? "S" : "N") : delta > 0 ? "E" : "W";
   const edge = getInteriorEdge(session.grid, player.room, dir);
   if (edge === null) {
-    if (isOwnExitAttempt(player.entranceSide, player.room, dir)) return delta; // always free — your own door
+    // Your own entrance is only passable OUTWARD once every room is lit — otherwise it blocks
+    // like any other wall. (Coming back INWARD from the vestibule never goes through this path at
+    // all — see clampVestibule — so entering is always unrestricted regardless of this check.)
+    if (isOwnExitAttempt(player.entranceSide, player.room, dir) && player.coloredRoomCount >= TOTAL_ROOMS) return delta;
     return clampDeltaToBoundary(cur, boundary, delta);
   }
   if (edge.state === "open") return delta;
@@ -248,26 +253,38 @@ function applyHumanMovement(session: LightMazeSession, player: PlayerState, inpu
   }
 }
 
-function attemptOpenDoorInFacing(session: LightMazeSession, player: PlayerState, now: number): void {
+/** Attempts whichever closed door the player is currently closest to (within
+ * DOOR_INTERACT_DISTANCE), regardless of which way they're facing — free movement means their
+ * facing direction doesn't reliably say which wall they're standing next to, so proximity alone
+ * decides it. Ties (e.g. standing near a corner where two walls are both close) go to whichever
+ * one is actually closest. */
+function attemptOpenNearbyDoor(session: LightMazeSession, player: PlayerState, now: number): void {
   if (player.outside) return;
-  const dir = player.facing;
-  const neighbor = neighborRoom(player.room, dir);
-  if (!neighbor) return; // boundary — own-exit is walked, not clicked; every other boundary has no door
-  const edge = getInteriorEdge(session.grid, player.room, dir);
-  if (!edge || edge.state === "open") return; // no-op per spec
-
-  const axisIsRow = dir === "N" || dir === "S";
-  const roomCoord = axisIsRow ? player.room.row : player.room.col;
-  const boundary = roomCoord + (dir === "S" || dir === "E" ? 0.5 : -0.5);
-  const playerAxisPos = axisIsRow ? player.pos.row : player.pos.col;
-  if (Math.abs(playerAxisPos - boundary) > DOOR_INTERACT_DISTANCE) return; // not close enough to this door
+  let bestDir: Side | null = null;
+  let bestDist = Infinity;
+  for (const dir of SIDES) {
+    if (!neighborRoom(player.room, dir)) continue; // boundary — own-exit is walked, not clicked
+    const edge = getInteriorEdge(session.grid, player.room, dir);
+    if (!edge || edge.state === "open") continue;
+    const axisIsRow = dir === "N" || dir === "S";
+    const roomCoord = axisIsRow ? player.room.row : player.room.col;
+    const boundary = roomCoord + (dir === "S" || dir === "E" ? 0.5 : -0.5);
+    const playerAxisPos = axisIsRow ? player.pos.row : player.pos.col;
+    const dist = Math.abs(playerAxisPos - boundary);
+    if (dist <= DOOR_INTERACT_DISTANCE && dist < bestDist) {
+      bestDist = dist;
+      bestDir = dir;
+    }
+  }
+  if (!bestDir) return;
+  const edge = getInteriorEdge(session.grid, player.room, bestDir)!;
 
   if (edge.state === "closed-real") {
     edge.state = "open";
     edge.animStartedAt = now;
     session.doorOpenedThisTick.push({ byPlayerId: player.id });
   } else {
-    session.failedAttemptMarker = { room: player.room, dir, shownAt: now };
+    session.failedAttemptMarker = { room: player.room, dir: bestDir, shownAt: now };
     session.humanDoorFailedThisTick = true;
   }
 }
@@ -315,7 +332,12 @@ function applyCpuMovement(session: LightMazeSession, player: PlayerState, dt: nu
       if (action.success) session.doorOpenedThisTick.push({ byPlayerId: player.id });
       return;
     case "exit":
-      player.headingOutside = true;
+      // Per the CPU's own exploration algorithm this only fires once its backtrack stack is fully
+      // unwound, which (given the maze is always fully connected) only happens after every room
+      // has been visited — so this should always already be true. Checked anyway rather than
+      // relied upon, matching the same "every room lit before you can leave" rule the human's own
+      // exit is held to (see clampAxis).
+      if (player.coloredRoomCount >= TOTAL_ROOMS) player.headingOutside = true;
       return;
   }
 }
@@ -356,7 +378,7 @@ export function updateLightMazeSession(session: LightMazeSession, now: number, i
   const human = session.players[0]!;
   if (!human.exited) {
     applyHumanMovement(session, human, input, dt);
-    if (input.clicked) attemptOpenDoorInFacing(session, human, now);
+    if (input.clicked) attemptOpenNearbyDoor(session, human, now);
     updateRoomTracking(session, human, now);
   }
 

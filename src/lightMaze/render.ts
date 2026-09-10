@@ -11,6 +11,7 @@ import {
   MID_INDEX,
   OUTER_BORDER_WIDTH,
   PLAYER_RADIUS,
+  TOTAL_ROOMS,
   VESTIBULE_DEPTH,
   WALL_WIDTH,
 } from "./constants.ts";
@@ -75,12 +76,14 @@ function line(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number,
 
 /** Every interior edge's roomA is always the room immediately N or W of roomB (see
  * interiorEdgeKey's string-ordering, which — since every row/col is a single digit 0-4 — sorts
- * exactly the same as comparing (row,col) tuples). The door panel spans (almost) the full wall,
- * hinged at the corner it shares with roomA's OTHER (perpendicular) wall — closed, it extends
- * along its own wall (flush, blocking the passage, indistinguishable from a plain wall); fully
- * open, it's rotated 90° to extend along that perpendicular wall instead — flush against IT,
- * fully out of the passage, parallel to a wall at both ends of the swing. */
-function computeEdgeGeom(layout: Layout, edge: DoorEdge): { hinge: { x: number; y: number }; wallDir: { x: number; y: number }; perpDir: { x: number; y: number }; panelLen: number } {
+ * exactly the same as comparing (row,col) tuples). The door itself is a small SECTION of the
+ * wall (see DOOR_LENGTH_FRACTION), hinged at the corner it shares with roomA's OTHER
+ * (perpendicular) wall — closed, it extends along its own wall (flush, blocking that section,
+ * indistinguishable from the plain solid stub covering the rest of the wall); fully open, it's
+ * rotated 90° to extend along that perpendicular wall instead — flush against it, fully out of
+ * the passage, parallel to a wall at both ends of the swing. The remaining, non-door stretch of
+ * the wall (from the far end of the door to `wallEnd`) is always solid. */
+function computeEdgeGeom(layout: Layout, edge: DoorEdge): { hinge: { x: number; y: number }; wallDir: { x: number; y: number }; perpDir: { x: number; y: number }; panelLen: number; wallEnd: { x: number; y: number } } {
   const dir = directionFromTo(edge.roomA, edge.roomB);
   const isVertical = dir === "E";
   const a = roomCenter(layout, edge.roomA);
@@ -88,7 +91,9 @@ function computeEdgeGeom(layout: Layout, edge: DoorEdge): { hinge: { x: number; 
   const hinge = isVertical ? { x: a.x + half, y: a.y - half } : { x: a.x - half, y: a.y + half };
   const wallDir = isVertical ? { x: 0, y: 1 } : { x: 1, y: 0 };
   const perpDir = isVertical ? { x: -1, y: 0 } : { x: 0, y: -1 }; // into roomA
-  return { hinge, wallDir, perpDir, panelLen: layout.cellSize * DOOR_LENGTH_FRACTION };
+  const panelLen = layout.cellSize * DOOR_LENGTH_FRACTION;
+  const wallEnd = { x: hinge.x + wallDir.x * layout.cellSize, y: hinge.y + wallDir.y * layout.cellSize };
+  return { hinge, wallDir, perpDir, panelLen, wallEnd };
 }
 
 function doorSwingT(session: LightMazeSession, edge: DoorEdge, now: number): number {
@@ -106,6 +111,11 @@ function drawWallsAndDoors(ctx: CanvasRenderingContext2D, session: LightMazeSess
   ctx.lineWidth = WALL_WIDTH;
   for (const edge of session.grid.edges.values()) {
     const geom = computeEdgeGeom(layout, edge);
+
+    // The rest of the wall past the door's own section — always solid, never animates.
+    const stubStart = { x: geom.hinge.x + geom.wallDir.x * geom.panelLen, y: geom.hinge.y + geom.wallDir.y * geom.panelLen };
+    line(ctx, stubStart.x, stubStart.y, geom.wallEnd.x, geom.wallEnd.y);
+
     const swingT = doorSwingT(session, edge, now);
     const angle = swingT * (Math.PI / 2);
     const cos = Math.cos(angle);
@@ -301,7 +311,7 @@ function drawHud(ctx: CanvasRenderingContext2D, session: LightMazeSession): void
     ctx.fillStyle = player.id === session.loserId ? "#e63946" : player.exited ? "#7fd98a" : "#fff";
     ctx.textAlign = "left";
     const status = player.id === session.loserId ? "LOST" : player.exited ? "OUT" : player.outside ? "OUTSIDE" : "IN";
-    ctx.fillText(`${identity.name} — ${status} — ${player.coloredRoomCount}/25`, x + 14, HUD_HEIGHT / 2);
+    ctx.fillText(`${identity.name} — ${status} — ${player.coloredRoomCount}/${TOTAL_ROOMS}`, x + 14, HUD_HEIGHT / 2);
     x += colW;
   }
 }
@@ -322,7 +332,7 @@ function drawResults(ctx: CanvasRenderingContext2D, session: LightMazeSession): 
 
   ctx.font = "16px 'Segoe UI', system-ui, sans-serif";
   ctx.fillStyle = "#a99fb3";
-  const summary = session.players.map((p) => `${session.identities[p.id]!.name}: ${p.coloredRoomCount}/25`).join("   ");
+  const summary = session.players.map((p) => `${session.identities[p.id]!.name}: ${p.coloredRoomCount}/${TOTAL_ROOMS}`).join("   ");
   ctx.fillText(summary, cx, cy + 30);
 }
 
