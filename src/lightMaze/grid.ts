@@ -1,4 +1,12 @@
-import { GRID_SIZE, MID_INDEX } from "./constants.ts";
+import { GRID_SIZE, MID_INDEX, VESTIBULE_DEPTH } from "./constants.ts";
+
+/** A continuous position in room-units — integer (row, col) is a room's CENTER, so a room spans
+ * [-0.5, +0.5] around its own integer coordinate on each axis, and the boundary between room r
+ * and r+1 sits at r+0.5. Used for free (non-grid-locked) movement — see LightMazeSession.ts. */
+export interface Position {
+  row: number;
+  col: number;
+}
 
 export type Side = "N" | "E" | "S" | "W";
 export const SIDES: Side[] = ["N", "E", "S", "W"];
@@ -99,4 +107,28 @@ export function getInteriorEdge(grid: MazeGrid, room: RoomId, dir: Side): DoorEd
  * a fixed, permanent, per-player fact rather than something that can be opened/closed/discovered. */
 export function isOwnExitAttempt(entranceSide: Side, room: RoomId, dir: Side): boolean {
   return dir === entranceSide && roomEquals(room, entranceRoomForSide(entranceSide));
+}
+
+/** True once a continuous position has crossed all the way past the grid's own bounding square —
+ * i.e. is out in someone's vestibule (or, in principle, further still). Derived fresh from
+ * position rather than stored, so there's exactly one source of truth for "am I outside". */
+export function isOutsideGrid(pos: Position): boolean {
+  return pos.row < -0.5 || pos.row > GRID_SIZE - 0.5 || pos.col < -0.5 || pos.col > GRID_SIZE - 0.5;
+}
+
+/** Where a player starts, before they've walked in — a bit out into their own entrance's
+ * vestibule, centered on their entrance's row/col. */
+export function outsideStartPos(side: Side): Position {
+  const room = entranceRoomForSide(side);
+  const offset = 0.5 + VESTIBULE_DEPTH * 0.65;
+  switch (side) {
+    case "N":
+      return { row: room.row - offset, col: room.col };
+    case "S":
+      return { row: room.row + offset, col: room.col };
+    case "W":
+      return { row: room.row, col: room.col - offset };
+    case "E":
+      return { row: room.row, col: room.col + offset };
+  }
 }

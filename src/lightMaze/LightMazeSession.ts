@@ -1,19 +1,34 @@
 // Light Maze's core session: a 5x5 grid of rooms (see grid.ts/mazeGen.ts), 4 players (1 human +
-// 3 CPU, see cpuBrain.ts) each permanently assigned one entrance side and one room-quadrant. Real
-// time, no turns. The instant the 3rd player exits back out their own entrance, the maze locks —
+// 3 CPU, see cpuBrain.ts) each permanently assigned one entrance side and one room-quadrant.
+// Movement is free/continuous (room-units, not grid-locked steps) — see clampAxis. Real time, no
+// turns. Every player starts OUTSIDE the maze, in a small vestibule by their own entrance, and
+// must walk in. The instant the 3rd player exits back out their own entrance, the maze locks —
 // every open door swings shut — and whoever's still inside is named the loser.
 
-import { DOOR_SWING_SHUT_MS, ENDING_HOLD_MS, FAILED_MARKER_MS, MOVE_DURATION_MS } from "./constants.ts";
+import {
+  CPU_MOVE_SPEED,
+  DOOR_INTERACT_DISTANCE,
+  DOOR_SWING_SHUT_MS,
+  ENDING_HOLD_MS,
+  FAILED_MARKER_MS,
+  PLAYER_RADIUS,
+  PLAYER_SPEED,
+  VESTIBULE_DEPTH,
+  VESTIBULE_LATERAL_CLAMP,
+} from "./constants.ts";
 import { decideCpuAction, createCpuBrain, type CpuBrain } from "./cpuBrain.ts";
 import {
   ENTRANCE_SIDE_BY_PLAYER,
   QUADRANT_BY_PLAYER,
   entranceRoomForSide,
   getInteriorEdge,
+  isOutsideGrid,
   isOwnExitAttempt,
   neighborRoom,
   oppositeSide,
+  outsideStartPos,
   type MazeGrid,
+  type Position,
   type Quadrant,
   type RoomId,
   type Side,
@@ -33,10 +48,18 @@ export interface PlayerState {
   isBot: boolean;
   quadrant: Quadrant;
   entranceSide: Side;
+  pos: Position;
+  /** Nearest/current discrete room — meaningful for door/CPU logic. While `outside`, still holds
+   * their own entrance room as a stable reference point for the vestibule and for re-entry. */
   room: RoomId;
+  outside: boolean;
   facing: Side;
+  /** CPU only — non-null while gliding in a straight line toward this (already-open, already
+   * decided) room. */
   moveTarget: RoomId | null;
-  moveStartedAt: number | null;
+  /** CPU only — true once its brain has decided it's done exploring and is walking back out
+   * through its own entrance; cleared implicitly once `exited` (see updateRoomTracking). */
+  headingOutside: boolean;
   exited: boolean;
   exitedAt: number | null;
   coloredRoomCount: number;
@@ -55,6 +78,9 @@ export interface LightMazeSession {
   identities: PlayerIdentity[];
   phase: LightMazePhase;
   startedAt: number;
+  /** Real timestamp of the last updateLightMazeSession call — lets movement work in real
+   * room-units-per-second regardless of the caller's own frame timing. */
+  lastUpdateAt: number;
   grid: MazeGrid;
   rooms: RoomState[][];
   players: PlayerState[];
@@ -63,15 +89,21 @@ export interface LightMazeSession {
   endingStartedAt: number | null;
   failedAttemptMarker: FailedAttemptMarker | null;
   // Edge-triggered, cleared at the start of every tick — main.ts reads these after each
-  // updateLightMazeSession call to dispatch one-shot sounds (mirrors Stampede's WeakMap-diff
-  // idiom, just as an explicit event list instead, since "who did it" matters for volume).
+  // updateLightMazeSession call to dispatch one-shot sounds.
   doorOpenedThisTick: { byPlayerId: number }[];
   humanDoorFailedThisTick: boolean;
   exitedThisTick: number[];
 }
 
 export interface LightMazeInput {
-  moveDir: Side | null;
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+  /** Most recently pressed movement key — sticky (kept until another is pressed), used only to
+   * pick which door a click attempts, independent of the (possibly diagonal, possibly zero)
+   * current movement vector. */
+  facing: Side | null;
   clicked: boolean;
 }
 
@@ -87,19 +119,6 @@ function doExit(session: LightMazeSession, player: PlayerState, now: number): vo
   player.exitedAt = now;
   session.exitOrder.push(player.id);
   session.exitedThisTick.push(player.id);
-}
-
-function beginMove(player: PlayerState, dir: Side, target: RoomId, now: number): void {
-  player.facing = dir;
-  player.moveTarget = target;
-  player.moveStartedAt = now;
-}
-
-function completeMove(session: LightMazeSession, player: PlayerState): void {
-  player.room = player.moveTarget!;
-  player.moveTarget = null;
-  player.moveStartedAt = null;
-  markRoomVisited(session, player);
 }
 
 export function createLightMazeSession(identities: PlayerIdentity[], now: number): LightMazeSession {
@@ -121,10 +140,12 @@ export function createLightMazeSession(identities: PlayerIdentity[], now: number
       isBot: identity.isBot,
       quadrant: QUADRANT_BY_PLAYER[identity.id]!,
       entranceSide,
+      pos: outsideStartPos(entranceSide),
       room,
+      outside: true,
       facing: oppositeSide(entranceSide), // starts facing INTO the maze, not back out
       moveTarget: null,
-      moveStartedAt: null,
+      headingOutside: false,
       exited: false,
       exitedAt: null,
       coloredRoomCount: 0,
@@ -132,10 +153,11 @@ export function createLightMazeSession(identities: PlayerIdentity[], now: number
     };
   });
 
-  const session: LightMazeSession = {
+  return {
     identities,
     phase: "PLAYING",
     startedAt: now,
+    lastUpdateAt: now,
     grid,
     rooms,
     players,
@@ -147,34 +169,99 @@ export function createLightMazeSession(identities: PlayerIdentity[], now: number
     humanDoorFailedThisTick: false,
     exitedThisTick: [],
   };
-
-  // Every player's own starting room is colored the instant the game begins — they "just walked
-  // in", the same as any other room they'll later enter.
-  for (const player of players) markRoomVisited(session, player);
-
-  return session;
 }
 
-function attemptMove(session: LightMazeSession, player: PlayerState, dir: Side, now: number): void {
-  if (player.moveTarget !== null) return; // one room at a time — ignore input mid-lerp
-  player.facing = dir; // bump sets facing even when blocked
-  const neighbor = neighborRoom(player.room, dir);
-  if (!neighbor) {
-    if (isOwnExitAttempt(player.entranceSide, player.room, dir)) doExit(session, player, now);
-    return; // otherwise: solid boundary, no-op
-  }
+function clampDeltaToBoundary(cur: number, boundary: number, delta: number): number {
+  if (delta > 0) return Math.max(0, boundary - PLAYER_RADIUS - cur);
+  return Math.min(0, boundary + PLAYER_RADIUS - cur);
+}
+
+/** Resolves movement along a single axis against the current room's own walls — the standard
+ * axis-separated approach to circle-vs-grid collision, which naturally lets a player slide along
+ * a wall instead of stopping dead the instant either axis alone would clip it. Only ever needs to
+ * consult the player's OWN current room (see `player.room`), since a single tick's movement is
+ * always far smaller than a room. */
+function clampAxis(session: LightMazeSession, player: PlayerState, axis: "row" | "col", delta: number): number {
+  if (delta === 0) return 0;
+  const cur = player.pos[axis];
+  const target = cur + delta;
+  const currentCoord = axis === "row" ? player.room.row : player.room.col;
+  const boundary = currentCoord + (delta > 0 ? 0.5 : -0.5);
+  const crossing = delta > 0 ? target + PLAYER_RADIUS > boundary : target - PLAYER_RADIUS < boundary;
+  if (!crossing) return delta;
+
+  const dir: Side = axis === "row" ? (delta > 0 ? "S" : "N") : delta > 0 ? "E" : "W";
   const edge = getInteriorEdge(session.grid, player.room, dir);
-  if (!edge || edge.state !== "open") return; // none/closed-real/closed-fake all block movement
-  beginMove(player, dir, neighbor, now);
+  if (edge === null) {
+    if (isOwnExitAttempt(player.entranceSide, player.room, dir)) return delta; // always free — your own door
+    return clampDeltaToBoundary(cur, boundary, delta);
+  }
+  if (edge.state === "open") return delta;
+  return clampDeltaToBoundary(cur, boundary, delta); // closed-real/closed-fake — always blocks
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}
+
+/** Free movement in the small staging area just outside a player's own entrance — no walls out
+ * there, just a soft clamp so they stay near their own door (not wandering across the front of
+ * the whole maze) and don't drift arbitrarily far from the grid. */
+function clampVestibule(player: PlayerState): void {
+  const room = player.room;
+  const side = player.entranceSide;
+  if (side === "N") {
+    player.pos.col = clamp(player.pos.col, room.col - VESTIBULE_LATERAL_CLAMP, room.col + VESTIBULE_LATERAL_CLAMP);
+    player.pos.row = Math.max(player.pos.row, room.row - 0.5 - VESTIBULE_DEPTH);
+  } else if (side === "S") {
+    player.pos.col = clamp(player.pos.col, room.col - VESTIBULE_LATERAL_CLAMP, room.col + VESTIBULE_LATERAL_CLAMP);
+    player.pos.row = Math.min(player.pos.row, room.row + 0.5 + VESTIBULE_DEPTH);
+  } else if (side === "W") {
+    player.pos.row = clamp(player.pos.row, room.row - VESTIBULE_LATERAL_CLAMP, room.row + VESTIBULE_LATERAL_CLAMP);
+    player.pos.col = Math.max(player.pos.col, room.col - 0.5 - VESTIBULE_DEPTH);
+  } else {
+    player.pos.row = clamp(player.pos.row, room.row - VESTIBULE_LATERAL_CLAMP, room.row + VESTIBULE_LATERAL_CLAMP);
+    player.pos.col = Math.min(player.pos.col, room.col + 0.5 + VESTIBULE_DEPTH);
+  }
+}
+
+function applyHumanMovement(session: LightMazeSession, player: PlayerState, input: LightMazeInput, dt: number): void {
+  if (input.facing) player.facing = input.facing;
+
+  let dRow = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+  let dCol = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  if (dRow === 0 && dCol === 0) return;
+  if (dRow !== 0 && dCol !== 0) {
+    dRow *= Math.SQRT1_2;
+    dCol *= Math.SQRT1_2;
+  }
+  const stepRow = dRow * PLAYER_SPEED * dt;
+  const stepCol = dCol * PLAYER_SPEED * dt;
+
+  if (player.outside) {
+    player.pos.row += stepRow;
+    player.pos.col += stepCol;
+    clampVestibule(player);
+  } else {
+    player.pos.col += clampAxis(session, player, "col", stepCol);
+    player.pos.row += clampAxis(session, player, "row", stepRow);
+  }
 }
 
 function attemptOpenDoorInFacing(session: LightMazeSession, player: PlayerState, now: number): void {
-  if (player.moveTarget !== null) return;
+  if (player.outside) return;
   const dir = player.facing;
   const neighbor = neighborRoom(player.room, dir);
-  if (!neighbor) return; // no door here — either a plain boundary, or your own exit (walked, not clicked)
+  if (!neighbor) return; // boundary — own-exit is walked, not clicked; every other boundary has no door
   const edge = getInteriorEdge(session.grid, player.room, dir);
-  if (!edge || edge.state === "open" || edge.state === "none") return; // no-op per spec
+  if (!edge || edge.state === "open") return; // no-op per spec
+
+  const axisIsRow = dir === "N" || dir === "S";
+  const roomCoord = axisIsRow ? player.room.row : player.room.col;
+  const boundary = roomCoord + (dir === "S" || dir === "E" ? 0.5 : -0.5);
+  const playerAxisPos = axisIsRow ? player.pos.row : player.pos.col;
+  if (Math.abs(playerAxisPos - boundary) > DOOR_INTERACT_DISTANCE) return; // not close enough to this door
+
   if (edge.state === "closed-real") {
     edge.state = "open";
     edge.animStartedAt = now;
@@ -185,25 +272,76 @@ function attemptOpenDoorInFacing(session: LightMazeSession, player: PlayerState,
   }
 }
 
-function applyCpuAction(session: LightMazeSession, player: PlayerState, now: number): void {
+function moveToward(player: PlayerState, target: Position, speed: number, dt: number): void {
+  const dRow = target.row - player.pos.row;
+  const dCol = target.col - player.pos.col;
+  const dist = Math.hypot(dRow, dCol);
+  const step = speed * dt;
+  if (dist <= step || dist < 1e-6) {
+    player.pos.row = target.row;
+    player.pos.col = target.col;
+    return;
+  }
+  player.pos.row += (dRow / dist) * step;
+  player.pos.col += (dCol / dist) * step;
+}
+
+function applyCpuMovement(session: LightMazeSession, player: PlayerState, dt: number, now: number): void {
+  if (player.outside) {
+    moveToward(player, { row: player.room.row, col: player.room.col }, CPU_MOVE_SPEED, dt);
+    return;
+  }
+  if (player.headingOutside) {
+    moveToward(player, outsideStartPos(player.entranceSide), CPU_MOVE_SPEED, dt);
+    return;
+  }
+  if (player.moveTarget) {
+    moveToward(player, { row: player.moveTarget.row, col: player.moveTarget.col }, CPU_MOVE_SPEED, dt);
+    if (player.pos.row === player.moveTarget.row && player.pos.col === player.moveTarget.col) player.moveTarget = null;
+    return;
+  }
+
   const cpu = player.cpu!;
   const action = decideCpuAction(session.grid, cpu, player.room, now);
   switch (action.type) {
     case "wait":
       return;
     case "move":
-      beginMove(player, action.dir, action.target, now);
+      player.facing = action.dir;
+      player.moveTarget = action.target;
       return;
     case "attemptOpen":
+      player.facing = action.dir;
       if (action.success) session.doorOpenedThisTick.push({ byPlayerId: player.id });
       return;
     case "exit":
-      doExit(session, player, now);
+      player.headingOutside = true;
       return;
   }
 }
 
+function updateRoomTracking(session: LightMazeSession, player: PlayerState, now: number): void {
+  const wasOutside = player.outside;
+  const nowOutside = isOutsideGrid(player.pos);
+  if (wasOutside && !nowOutside) {
+    player.room = entranceRoomForSide(player.entranceSide);
+    markRoomVisited(session, player);
+  } else if (!wasOutside && nowOutside) {
+    doExit(session, player, now);
+  } else if (!nowOutside) {
+    const newRoom: RoomId = { row: Math.round(player.pos.row), col: Math.round(player.pos.col) };
+    if (newRoom.row !== player.room.row || newRoom.col !== player.room.col) {
+      player.room = newRoom;
+      markRoomVisited(session, player);
+    }
+  }
+  player.outside = nowOutside;
+}
+
 export function updateLightMazeSession(session: LightMazeSession, now: number, input: LightMazeInput): void {
+  const dt = Math.min(0.05, Math.max(0, (now - session.lastUpdateAt) / 1000));
+  session.lastUpdateAt = now;
+
   if (session.phase === "RESULTS") return;
 
   session.doorOpenedThisTick = [];
@@ -212,20 +350,20 @@ export function updateLightMazeSession(session: LightMazeSession, now: number, i
 
   if (session.phase === "ENDING") {
     if (now - session.endingStartedAt! >= DOOR_SWING_SHUT_MS + ENDING_HOLD_MS) session.phase = "RESULTS";
-    return; // frozen — no movement/CPU updates, mirrors StampedeSession's transition freeze
+    return; // frozen — no movement/CPU updates
   }
 
   const human = session.players[0]!;
   if (!human.exited) {
-    if (input.moveDir) attemptMove(session, human, input.moveDir, now);
+    applyHumanMovement(session, human, input, dt);
     if (input.clicked) attemptOpenDoorInFacing(session, human, now);
+    updateRoomTracking(session, human, now);
   }
 
   for (const player of session.players) {
-    if (player.moveTarget && now - player.moveStartedAt! >= MOVE_DURATION_MS) completeMove(session, player);
-  }
-  for (const player of session.players) {
-    if (player.isBot && !player.exited && player.moveTarget === null) applyCpuAction(session, player, now);
+    if (!player.isBot || player.exited) continue;
+    applyCpuMovement(session, player, dt, now);
+    updateRoomTracking(session, player, now);
   }
 
   if (session.failedAttemptMarker && now - session.failedAttemptMarker.shownAt >= FAILED_MARKER_MS) {

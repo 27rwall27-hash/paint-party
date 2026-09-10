@@ -1,6 +1,6 @@
-export const CANVAS_W = 1280;
-export const CANVAS_H = 720;
-export const HUD_HEIGHT = 56;
+export const CANVAS_W = 1400;
+export const CANVAS_H = 1480;
+export const HUD_HEIGHT = 60;
 
 export const PLAYER_COUNT = 4;
 export const GRID_SIZE = 5;
@@ -20,21 +20,36 @@ export const CPU_NAME_PREFIX = "CPU";
 // --- Maze generation (mazeGen.ts) -----------------------------------------------------------
 // A 5x5 grid has 40 total interior edges; the spanning tree that guarantees full connectivity
 // always uses exactly GRID_SIZE*GRID_SIZE - 1 = 24 of them, leaving 16 "non-tree" candidates.
-// First-pass split of those 16, same "expect retuning" spirit as every other constant in this
-// suite: a handful become extra real loop-edges (so it's not one fragile single path), and of
-// what's left, roughly half become permanently-fake trap doors rather than plain invisible walls
-// — visible, temptable, and useless, which is the deliberate "remember which doors don't open"
-// mechanic — with the rest staying plain solid walls.
+// A handful become extra real loop-edges (so it's not one fragile single path). EVERY remaining
+// edge becomes a locked (fake) door rather than a plain invisible wall — every wall in the maze
+// is a door you can walk up to and try, real or not, so a dead end always reads as "several doors
+// here, all locked" rather than "no doors here at all" (per direct feedback).
 export const EXTRA_LOOP_EDGE_COUNT = 4;
-export const FAKE_DOOR_FRACTION = 0.5;
+export const FAKE_DOOR_FRACTION = 1;
 
-// --- Movement / animation --------------------------------------------------------------------
-// How long it takes to glide from one room's center to an adjacent one's, for both the human and
-// CPUs — one room at a time, no skipping.
-export const MOVE_DURATION_MS = 420;
-// How long a door's hinge takes to swing fully open once opened, and how long the end-of-game
-// "every open door slams shut" sweep takes.
-export const DOOR_SWING_OPEN_MS = 260;
+// --- Movement / collision (room-units — 1.0 = one room width/height, independent of pixel
+// rendering scale) -----------------------------------------------------------------------------
+export const PLAYER_RADIUS = 0.16;
+// Free (not grid-locked) movement speed, in room-units per second — held WASD keys combine into a
+// real direction vector (diagonals included), resolved against walls/closed doors per axis.
+export const PLAYER_SPEED = 2.4;
+export const CPU_MOVE_SPEED = 2.1;
+// How far outside the grid each player's own starting "vestibule" extends, and how tightly their
+// lateral position is held near their own entrance while out there.
+export const VESTIBULE_DEPTH = 0.85;
+export const VESTIBULE_LATERAL_CLAMP = 0.6;
+// How close (along the wall-facing axis, in room-units) a player must stand to actually attempt
+// opening the door they're facing — "right in front of it", not just anywhere in the room.
+export const DOOR_INTERACT_DISTANCE = 0.42;
+
+// --- Door swing animation ----------------------------------------------------------------------
+// Closed doors span (almost) the FULL wall, hinged at one corner — visually identical to a solid
+// wall whether real, fake, or (structurally still possible, just unused by mazeGen now)
+// unassigned. Opening swings the whole panel 90°, from flush along its own wall to flush along
+// the room's OTHER wall at that same corner — fully out of the passage and parallel to a wall the
+// entire time, at both ends of the swing.
+export const DOOR_LENGTH_FRACTION = 0.96;
+export const DOOR_SWING_OPEN_MS = 320;
 export const DOOR_SWING_SHUT_MS = 900;
 // How long the small red "X" stays on screen after a failed (fake-door) open attempt.
 export const FAILED_MARKER_MS = 550;
@@ -44,14 +59,17 @@ export const ENDING_HOLD_MS = 700;
 
 // --- CPU pacing -------------------------------------------------------------------------------
 // Each CPU rolls a persistent 0..1 "skill" once at game start (Stampede's rollCpuSkill
-// convention) that governs how quickly it acts — higher skill = faster, more confident decisions.
-// Interpolated the same way Stampede's rank-based jump timing is: skill 0 -> SLOW, skill 1 -> FAST.
-export const CPU_DECISION_INTERVAL_SLOW_MS = 950;
-export const CPU_DECISION_INTERVAL_FAST_MS = 420;
+// convention) that governs how quickly it decides what to do next — higher skill = faster, more
+// confident decisions. Actual movement speed (CPU_MOVE_SPEED) is fixed/shared, matching the
+// human's own movement physics; only the THINKING pace varies.
+export const CPU_DECISION_INTERVAL_SLOW_MS = 650;
+export const CPU_DECISION_INTERVAL_FAST_MS = 220;
 export const CPU_DECISION_JITTER = 0.35; // +/- fraction, so the same CPU doesn't tick metronomically
 // CPUs wait a little before their very first decision, so the game doesn't look like it's racing
 // ahead of the human before they've even gotten their bearings.
 export const CPU_FIRST_DECISION_DELAY_MS = 900;
 
 // --- Rendering --------------------------------------------------------------------------------
-export const GRID_MARGIN = 24; // px of breathing room around the 5x5 grid within the canvas
+export const GRID_MARGIN = 20; // px of breathing room around the full (grid + vestibule) layout
+export const OUTER_BORDER_WIDTH = 12; // px — thick, high-contrast frame around the grid perimeter
+export const WALL_WIDTH = 5; // px — regular interior door/wall line weight

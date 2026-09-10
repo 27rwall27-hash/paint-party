@@ -18,7 +18,12 @@ initSetupUI(identities);
 let session: LightMazeSession | null = null;
 
 const KEY_TO_DIR: Record<string, Side> = { w: "N", a: "W", s: "S", d: "E" };
-let heldDir: Side | null = null;
+// Free movement combines every currently-held direction key into a (possibly diagonal) vector —
+// see the Set below. `facing` is separate: it's just whichever direction key was most recently
+// pressed, sticky until another is pressed, and only ever used to pick which door a click
+// attempts (not tied to the movement vector at all).
+const heldDirs = new Set<Side>();
+let facing: Side | null = null;
 let pendingClicked = false;
 let wasEnding = false;
 
@@ -26,11 +31,12 @@ window.addEventListener("keydown", (e) => {
   const dir = KEY_TO_DIR[e.key.toLowerCase()];
   if (!dir) return;
   e.preventDefault();
-  heldDir = dir;
+  heldDirs.add(dir);
+  facing = dir;
 });
 window.addEventListener("keyup", (e) => {
   const dir = KEY_TO_DIR[e.key.toLowerCase()];
-  if (dir && heldDir === dir) heldDir = null;
+  if (dir) heldDirs.delete(dir);
 });
 
 canvas.addEventListener("pointerdown", () => {
@@ -41,7 +47,8 @@ canvas.addEventListener("pointerdown", () => {
 startBtn.addEventListener("click", () => {
   setupPanel.hidden = true;
   playAgainBtn.hidden = true;
-  heldDir = null;
+  heldDirs.clear();
+  facing = null;
   pendingClicked = false;
   wasEnding = false;
   sound.init();
@@ -56,7 +63,15 @@ playAgainBtn.addEventListener("click", () => {
 
 function loop(time: number): void {
   if (session) {
-    updateLightMazeSession(session, time, { moveDir: heldDir, clicked: pendingClicked });
+    updateLightMazeSession(session, time, {
+      up: heldDirs.has("N"),
+      down: heldDirs.has("S"),
+      left: heldDirs.has("W"),
+      right: heldDirs.has("E"),
+      facing,
+      clicked: pendingClicked,
+    });
+    facing = null; // consumed — updateLightMazeSession only updates player.facing when this is non-null
     pendingClicked = false;
 
     for (const event of session.doorOpenedThisTick) sound.playDoorOpen(event.byPlayerId === 0);

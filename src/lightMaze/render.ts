@@ -1,5 +1,20 @@
-import { CANVAS_H, CANVAS_W, DOOR_SWING_OPEN_MS, DOOR_SWING_SHUT_MS, FAILED_MARKER_MS, GRID_MARGIN, GRID_SIZE, HUD_HEIGHT, MOVE_DURATION_MS } from "./constants.ts";
-import { directionFromTo, entranceRoomForSide, ENTRANCE_SIDE_BY_PLAYER, QUADRANT_BY_PLAYER, type DoorEdge, type RoomId } from "./grid.ts";
+import {
+  CANVAS_H,
+  CANVAS_W,
+  DOOR_LENGTH_FRACTION,
+  DOOR_SWING_OPEN_MS,
+  DOOR_SWING_SHUT_MS,
+  FAILED_MARKER_MS,
+  GRID_MARGIN,
+  GRID_SIZE,
+  HUD_HEIGHT,
+  MID_INDEX,
+  OUTER_BORDER_WIDTH,
+  PLAYER_RADIUS,
+  VESTIBULE_DEPTH,
+  WALL_WIDTH,
+} from "./constants.ts";
+import { directionFromTo, entranceRoomForSide, ENTRANCE_SIDE_BY_PLAYER, QUADRANT_BY_PLAYER, type DoorEdge, type Position, type RoomId } from "./grid.ts";
 import type { PlayerIdentity } from "./identities.ts";
 import type { LightMazeSession, PlayerState } from "./LightMazeSession.ts";
 
@@ -18,59 +33,62 @@ function lerpColor(hexA: string, hexB: string, t: number): string {
   return `rgb(${Math.round(lerp(a.r, b.r, t))}, ${Math.round(lerp(a.g, b.g, t))}, ${Math.round(lerp(a.b, b.b, t))})`;
 }
 
+// Total room-units spanned by the drawable area — the 5x5 grid itself, plus a vestibule margin
+// reserved on ALL FOUR sides (since all 4 entrances/vestibules are in view simultaneously).
+const WORLD_SIZE = GRID_SIZE + 2 * VESTIBULE_DEPTH;
+
 interface Layout {
   cellSize: number;
-  originX: number;
+  originX: number; // pixel position of room (row 0, col 0)'s CENTER
   originY: number;
 }
 
 function computeLayout(): Layout {
   const availW = CANVAS_W - GRID_MARGIN * 2;
   const availH = CANVAS_H - HUD_HEIGHT - GRID_MARGIN * 2;
-  const cellSize = Math.min(availW, availH) / GRID_SIZE;
-  const gridPixelSize = cellSize * GRID_SIZE;
+  const cellSize = Math.min(availW, availH) / WORLD_SIZE;
+  const worldPixelW = cellSize * WORLD_SIZE;
+  const worldPixelH = cellSize * WORLD_SIZE;
+  const boxLeft = (CANVAS_W - worldPixelW) / 2;
+  const boxTop = HUD_HEIGHT + (CANVAS_H - HUD_HEIGHT - worldPixelH) / 2;
   return {
     cellSize,
-    originX: (CANVAS_W - gridPixelSize) / 2,
-    originY: HUD_HEIGHT + (CANVAS_H - HUD_HEIGHT - gridPixelSize) / 2,
+    originX: boxLeft + (0.5 + VESTIBULE_DEPTH) * cellSize,
+    originY: boxTop + (0.5 + VESTIBULE_DEPTH) * cellSize,
   };
+}
+
+function worldToPixel(layout: Layout, pos: Position): { x: number; y: number } {
+  return { x: layout.originX + pos.col * layout.cellSize, y: layout.originY + pos.row * layout.cellSize };
 }
 
 function roomCenter(layout: Layout, room: RoomId): { x: number; y: number } {
-  return {
-    x: layout.originX + (room.col + 0.5) * layout.cellSize,
-    y: layout.originY + (room.row + 0.5) * layout.cellSize,
-  };
+  return worldToPixel(layout, { row: room.row, col: room.col });
 }
 
-interface EdgeGeom {
-  hinge: { x: number; y: number };
-  wallStart: { x: number; y: number };
-  wallEnd: { x: number; y: number };
-  wallDir: { x: number; y: number };
-  perpDir: { x: number; y: number };
-  gapLen: number;
+function line(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
 }
 
 /** Every interior edge's roomA is always the room immediately N or W of roomB (see
  * interiorEdgeKey's string-ordering, which — since every row/col is a single digit 0-4 — sorts
- * exactly the same as comparing (row,col) tuples), so the wall is always vertical (roomB is east
- * of roomA) or horizontal (roomB is south of roomA). The door "panel" pivots at a hinge point
- * centered in the wall segment, swinging from flush-with-the-wall (closed, blocking the gap) to
- * perpendicular, into roomA's side (open). */
-function computeEdgeGeom(layout: Layout, edge: DoorEdge): EdgeGeom {
+ * exactly the same as comparing (row,col) tuples). The door panel spans (almost) the full wall,
+ * hinged at the corner it shares with roomA's OTHER (perpendicular) wall — closed, it extends
+ * along its own wall (flush, blocking the passage, indistinguishable from a plain wall); fully
+ * open, it's rotated 90° to extend along that perpendicular wall instead — flush against IT,
+ * fully out of the passage, parallel to a wall at both ends of the swing. */
+function computeEdgeGeom(layout: Layout, edge: DoorEdge): { hinge: { x: number; y: number }; wallDir: { x: number; y: number }; perpDir: { x: number; y: number }; panelLen: number } {
   const dir = directionFromTo(edge.roomA, edge.roomB);
   const isVertical = dir === "E";
-  const wallStart = isVertical
-    ? { x: layout.originX + (edge.roomA.col + 1) * layout.cellSize, y: layout.originY + edge.roomA.row * layout.cellSize }
-    : { x: layout.originX + edge.roomA.col * layout.cellSize, y: layout.originY + (edge.roomA.row + 1) * layout.cellSize };
+  const a = roomCenter(layout, edge.roomA);
+  const half = layout.cellSize / 2;
+  const hinge = isVertical ? { x: a.x + half, y: a.y - half } : { x: a.x - half, y: a.y + half };
   const wallDir = isVertical ? { x: 0, y: 1 } : { x: 1, y: 0 };
-  const perpDir = isVertical ? { x: -1, y: 0 } : { x: 0, y: -1 }; // points toward roomA's side
-  const wallEnd = { x: wallStart.x + wallDir.x * layout.cellSize, y: wallStart.y + wallDir.y * layout.cellSize };
-  const gapLen = layout.cellSize * 0.55;
-  const gapOffset = (layout.cellSize - gapLen) / 2;
-  const hinge = { x: wallStart.x + wallDir.x * gapOffset, y: wallStart.y + wallDir.y * gapOffset };
-  return { hinge, wallStart, wallEnd, wallDir, perpDir, gapLen };
+  const perpDir = isVertical ? { x: -1, y: 0 } : { x: 0, y: -1 }; // into roomA
+  return { hinge, wallDir, perpDir, panelLen: layout.cellSize * DOOR_LENGTH_FRACTION };
 }
 
 function doorSwingT(session: LightMazeSession, edge: DoorEdge, now: number): number {
@@ -84,46 +102,43 @@ function doorSwingT(session: LightMazeSession, edge: DoorEdge, now: number): num
 
 function drawWallsAndDoors(ctx: CanvasRenderingContext2D, session: LightMazeSession, layout: Layout, now: number): void {
   ctx.lineCap = "round";
+  ctx.strokeStyle = "#4a4256";
+  ctx.lineWidth = WALL_WIDTH;
   for (const edge of session.grid.edges.values()) {
     const geom = computeEdgeGeom(layout, edge);
-    if (edge.state === "none") {
-      ctx.strokeStyle = "#3a3242";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(geom.wallStart.x, geom.wallStart.y);
-      ctx.lineTo(geom.wallEnd.x, geom.wallEnd.y);
-      ctx.stroke();
-      continue;
-    }
-    // Two short stub posts flanking the gap — same color/weight as a plain wall, since a
-    // closed-real and closed-fake door must look IDENTICAL from the outside.
-    ctx.strokeStyle = "#3a3242";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(geom.wallStart.x, geom.wallStart.y);
-    ctx.lineTo(geom.hinge.x, geom.hinge.y);
-    ctx.stroke();
-    const gapEnd = { x: geom.hinge.x + geom.wallDir.x * geom.gapLen, y: geom.hinge.y + geom.wallDir.y * geom.gapLen };
-    ctx.beginPath();
-    ctx.moveTo(gapEnd.x, gapEnd.y);
-    ctx.lineTo(geom.wallEnd.x, geom.wallEnd.y);
-    ctx.stroke();
-
-    // The door panel itself, pivoting at the hinge from flush (angle 0, blocking) to perpendicular
-    // (angle 90°, swung open into roomA's side).
     const swingT = doorSwingT(session, edge, now);
     const angle = swingT * (Math.PI / 2);
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
-    const panelDirX = geom.wallDir.x * cos + geom.perpDir.x * sin;
-    const panelDirY = geom.wallDir.y * cos + geom.perpDir.y * sin;
-    ctx.strokeStyle = "#8a7fa0";
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(geom.hinge.x, geom.hinge.y);
-    ctx.lineTo(geom.hinge.x + panelDirX * geom.gapLen, geom.hinge.y + panelDirY * geom.gapLen);
-    ctx.stroke();
+    const dirX = geom.wallDir.x * cos + geom.perpDir.x * sin;
+    const dirY = geom.wallDir.y * cos + geom.perpDir.y * sin;
+    line(ctx, geom.hinge.x, geom.hinge.y, geom.hinge.x + dirX * geom.panelLen, geom.hinge.y + dirY * geom.panelLen);
   }
+}
+
+function drawOuterBorder(ctx: CanvasRenderingContext2D, layout: Layout): void {
+  const half = layout.cellSize / 2;
+  const left = layout.originX - half;
+  const right = layout.originX + (GRID_SIZE - 1) * layout.cellSize + half;
+  const top = layout.originY - half;
+  const bottom = layout.originY + (GRID_SIZE - 1) * layout.cellSize + half;
+  const gapHalf = half;
+
+  ctx.strokeStyle = "#e8e2f2";
+  ctx.lineWidth = OUTER_BORDER_WIDTH;
+  ctx.lineCap = "square";
+
+  const gapX = layout.originX + MID_INDEX * layout.cellSize;
+  line(ctx, left, top, gapX - gapHalf, top);
+  line(ctx, gapX + gapHalf, top, right, top);
+  line(ctx, left, bottom, gapX - gapHalf, bottom);
+  line(ctx, gapX + gapHalf, bottom, right, bottom);
+
+  const gapY = layout.originY + MID_INDEX * layout.cellSize;
+  line(ctx, left, top, left, gapY - gapHalf);
+  line(ctx, left, gapY + gapHalf, left, bottom);
+  line(ctx, right, top, right, gapY - gapHalf);
+  line(ctx, right, gapY + gapHalf, right, bottom);
 }
 
 function entranceSwingT(session: LightMazeSession, now: number): number {
@@ -134,39 +149,35 @@ function entranceSwingT(session: LightMazeSession, now: number): number {
 
 function drawEntrances(ctx: CanvasRenderingContext2D, session: LightMazeSession, layout: Layout, now: number): void {
   const swingT = entranceSwingT(session, now);
+  const half = layout.cellSize / 2;
   for (let id = 0; id < session.players.length; id++) {
     const side = ENTRANCE_SIDE_BY_PLAYER[id]!;
     const room = entranceRoomForSide(side);
     const identity = session.identities[id]!;
     const center = roomCenter(layout, room);
-    const half = layout.cellSize * 0.28;
-    let gapCenter: { x: number; y: number };
-    let alongX: boolean;
+    let x1: number, y1: number, x2: number, y2: number;
     if (side === "N") {
-      gapCenter = { x: center.x, y: layout.originY + room.row * layout.cellSize };
-      alongX = true;
+      x1 = center.x - half * 0.85;
+      x2 = center.x + half * 0.85;
+      y1 = y2 = layout.originY - half;
     } else if (side === "S") {
-      gapCenter = { x: center.x, y: layout.originY + (room.row + 1) * layout.cellSize };
-      alongX = true;
+      x1 = center.x - half * 0.85;
+      x2 = center.x + half * 0.85;
+      y1 = y2 = layout.originY + (GRID_SIZE - 1) * layout.cellSize + half;
     } else if (side === "W") {
-      gapCenter = { x: layout.originX + room.col * layout.cellSize, y: center.y };
-      alongX = false;
+      y1 = center.y - half * 0.85;
+      y2 = center.y + half * 0.85;
+      x1 = x2 = layout.originX - half;
     } else {
-      gapCenter = { x: layout.originX + (room.col + 1) * layout.cellSize, y: center.y };
-      alongX = false;
+      y1 = center.y - half * 0.85;
+      y2 = center.y + half * 0.85;
+      x1 = x2 = layout.originX + (GRID_SIZE - 1) * layout.cellSize + half;
     }
     ctx.strokeStyle = identity.color;
-    ctx.lineWidth = 6;
-    ctx.globalAlpha = 0.55 + 0.45 * swingT;
-    ctx.beginPath();
-    if (alongX) {
-      ctx.moveTo(gapCenter.x - half, gapCenter.y);
-      ctx.lineTo(gapCenter.x + half, gapCenter.y);
-    } else {
-      ctx.moveTo(gapCenter.x, gapCenter.y - half);
-      ctx.lineTo(gapCenter.x, gapCenter.y + half);
-    }
-    ctx.stroke();
+    ctx.lineWidth = OUTER_BORDER_WIDTH * 0.8;
+    ctx.lineCap = "round";
+    ctx.globalAlpha = 0.5 + 0.5 * swingT;
+    line(ctx, x1, y1, x2, y2);
     ctx.globalAlpha = 1;
   }
 }
@@ -177,30 +188,37 @@ function drawRooms(ctx: CanvasRenderingContext2D, session: LightMazeSession, lay
   for (let row = 0; row < GRID_SIZE; row++) {
     for (let col = 0; col < GRID_SIZE; col++) {
       const cell = session.rooms[row]![col]!;
-      const x = layout.originX + col * layout.cellSize;
-      const y = layout.originY + row * layout.cellSize;
+      const x = layout.originX + (col - 0.5) * layout.cellSize;
+      const y = layout.originY + (row - 0.5) * layout.cellSize;
       const half = layout.cellSize / 2;
+      const squareSize = layout.cellSize * 0.26;
 
       for (let playerId = 0; playerId < 4; playerId++) {
         const quadrant = QUADRANT_BY_PLAYER[playerId]!;
         const [qx, qy] = QUADRANT_RECT[quadrant]!;
+        const quadCx = x + (qx + 0.25) * half * 2;
+        const quadCy = y + (qy + 0.25) * half * 2;
         const visited = cell.visitedByPlayer[playerId];
-        ctx.fillStyle = visited ? session.identities[playerId]!.color : "#211c28";
-        ctx.globalAlpha = visited ? 0.85 : 1;
-        ctx.fillRect(x + qx * layout.cellSize, y + qy * layout.cellSize, half, half);
-        ctx.globalAlpha = 1;
+        if (visited) {
+          ctx.fillStyle = session.identities[playerId]!.color;
+          ctx.fillRect(quadCx - squareSize / 2, quadCy - squareSize / 2, squareSize, squareSize);
+        } else {
+          ctx.strokeStyle = "rgba(255,255,255,0.08)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(quadCx - squareSize / 2, quadCy - squareSize / 2, squareSize, squareSize);
+        }
       }
 
       const litFraction = cell.visitedByPlayer.filter(Boolean).length / 4;
       const center = roomCenter(layout, cell.room);
       ctx.beginPath();
-      ctx.arc(center.x, center.y, Math.max(3, layout.cellSize * 0.06), 0, Math.PI * 2);
+      ctx.arc(center.x, center.y, Math.max(3, layout.cellSize * 0.045), 0, Math.PI * 2);
       ctx.fillStyle = lerpColor("#4a4456", "#ffe27a", litFraction);
       ctx.fill();
       if (litFraction >= 1) {
         ctx.save();
         ctx.shadowColor = "#ffe27a";
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = 14;
         ctx.fill();
         ctx.restore();
       }
@@ -218,9 +236,9 @@ function drawFailedMarker(ctx: CanvasRenderingContext2D, session: LightMazeSessi
   const dirOffset = { N: { x: 0, y: -0.5 }, S: { x: 0, y: 0.5 }, E: { x: 0.5, y: 0 }, W: { x: -0.5, y: 0 } }[marker.dir];
   const x = center.x + dirOffset.x * layout.cellSize;
   const y = center.y + dirOffset.y * layout.cellSize;
-  const size = layout.cellSize * 0.14;
+  const size = layout.cellSize * 0.13;
   ctx.strokeStyle = `rgba(230, 57, 70, ${alpha.toFixed(2)})`;
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 6;
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.moveTo(x - size, y - size);
@@ -230,16 +248,10 @@ function drawFailedMarker(ctx: CanvasRenderingContext2D, session: LightMazeSessi
   ctx.stroke();
 }
 
-function drawPlayerToken(ctx: CanvasRenderingContext2D, layout: Layout, player: PlayerState, identity: PlayerIdentity, now: number): void {
+function drawPlayerToken(ctx: CanvasRenderingContext2D, layout: Layout, player: PlayerState, identity: PlayerIdentity): void {
   if (player.exited) return;
-  const from = roomCenter(layout, player.room);
-  let pos = from;
-  if (player.moveTarget && player.moveStartedAt !== null) {
-    const to = roomCenter(layout, player.moveTarget);
-    const t = Math.min(1, (now - player.moveStartedAt) / MOVE_DURATION_MS);
-    pos = { x: lerp(from.x, to.x, t), y: lerp(from.y, to.y, t) };
-  }
-  const radius = layout.cellSize * 0.16;
+  const pos = worldToPixel(layout, player.pos);
+  const radius = layout.cellSize * PLAYER_RADIUS;
 
   const facingVec = { N: { x: 0, y: -1 }, S: { x: 0, y: 1 }, E: { x: 1, y: 0 }, W: { x: -1, y: 0 } }[player.facing];
   ctx.beginPath();
@@ -270,14 +282,14 @@ function drawHud(ctx: CanvasRenderingContext2D, session: LightMazeSession): void
   ctx.fillStyle = "#1b1620";
   ctx.fillRect(0, 0, CANVAS_W, HUD_HEIGHT);
 
-  ctx.font = "bold 16px 'Segoe UI', system-ui, sans-serif";
+  ctx.font = "bold 17px 'Segoe UI', system-ui, sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#fff";
   ctx.fillText("Light Maze", 20, HUD_HEIGHT / 2);
 
-  const colW = 220;
-  let x = 210;
+  const colW = 240;
+  let x = 220;
   for (const player of session.players) {
     const identity = session.identities[player.id]!;
     ctx.beginPath();
@@ -288,7 +300,7 @@ function drawHud(ctx: CanvasRenderingContext2D, session: LightMazeSession): void
     ctx.font = "13px 'Segoe UI', system-ui, sans-serif";
     ctx.fillStyle = player.id === session.loserId ? "#e63946" : player.exited ? "#7fd98a" : "#fff";
     ctx.textAlign = "left";
-    const status = player.id === session.loserId ? "LOST" : player.exited ? "OUT" : "IN";
+    const status = player.id === session.loserId ? "LOST" : player.exited ? "OUT" : player.outside ? "OUTSIDE" : "IN";
     ctx.fillText(`${identity.name} — ${status} — ${player.coloredRoomCount}/25`, x + 14, HUD_HEIGHT / 2);
     x += colW;
   }
@@ -321,8 +333,9 @@ export function render(ctx: CanvasRenderingContext2D, session: LightMazeSession,
   const layout = computeLayout();
   drawRooms(ctx, session, layout);
   drawWallsAndDoors(ctx, session, layout, now);
+  drawOuterBorder(ctx, layout);
   drawEntrances(ctx, session, layout, now);
-  for (const player of session.players) drawPlayerToken(ctx, layout, player, session.identities[player.id]!, now);
+  for (const player of session.players) drawPlayerToken(ctx, layout, player, session.identities[player.id]!);
   drawFailedMarker(ctx, session, layout, now);
   drawHud(ctx, session);
 
