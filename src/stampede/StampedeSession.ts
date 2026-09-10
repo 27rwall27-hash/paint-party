@@ -84,7 +84,7 @@ export interface StampedeSession {
 }
 
 /** Fisher-Yates, returns a new array. */
-function shuffled<T>(items: T[]): T[] {
+export function shuffled<T>(items: T[]): T[] {
   const result = [...items];
   for (let i = result.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));

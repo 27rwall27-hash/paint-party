@@ -11,10 +11,24 @@
       <canvas id="race" width="1280" height="720"></canvas>
 
       <div id="setupPanel">
-        <p class="settingsHint">
+        <div class="settingsRow modeToggleRow">
+          <label class="modeToggle">
+            <input type="radio" name="gameMode" value="classic" checked />
+            <span>Classic</span>
+          </label>
+          <label class="modeToggle">
+            <input type="radio" name="gameMode" value="battleRoyale" />
+            <span>Battle Royale</span>
+          </label>
+        </div>
+        <p class="settingsHint" id="classicHint">
           8 racers, one obstacle at a time — click to jump, mistime it and you're sent to the back
           of the pack. The race eventually splits in two, then in three; your final score is the
           sum of your placement in all three at the end.
+        </p>
+        <p class="settingsHint" id="battleRoyaleHint" hidden>
+          24 racers, split into 3 sections from the start. Miss one jump and you're eliminated —
+          no second chances. Every 4 eliminations the pace ramps up. Last one standing wins.
         </p>
         <div class="settingsRow">
           <input id="racerNameInput" type="text" maxlength="12" placeholder="You" />

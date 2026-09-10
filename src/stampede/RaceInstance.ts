@@ -57,7 +57,10 @@ export interface RaceRacerState {
   knockedOutThisWave: boolean;
 }
 
-export function isAirborne(racer: RaceRacerState, now: number): boolean {
+// Structural rather than RaceRacerState-typed on purpose — Battle Royale's racer state has the
+// same jumpStartedAt/jumpAirtimeMs shape but isn't a RaceRacerState (no rank/displaySlot concept
+// there), and this is genuinely the same "still airborne" check for both, not worth duplicating.
+export function isAirborne(racer: { jumpStartedAt: number; jumpAirtimeMs: number }, now: number): boolean {
   return racer.jumpStartedAt > 0 && now >= racer.jumpStartedAt && now < racer.jumpStartedAt + racer.jumpAirtimeMs;
 }
 

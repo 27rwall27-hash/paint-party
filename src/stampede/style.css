@@ -103,6 +103,35 @@ body {
   box-shadow: 0 0 0 2px #241f29, 0 0 0 4px #ffd60a;
 }
 
+.modeToggleRow {
+  margin-bottom: 12px;
+}
+
+.modeToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #453e4e;
+  background: #17131c;
+  color: #a99fb3;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.modeToggle input {
+  accent-color: #ffd60a;
+  margin: 0;
+}
+
+.modeToggle:has(input:checked) {
+  border-color: #ffd60a;
+  color: #fff;
+  background: rgba(255, 214, 10, 0.12);
+}
+
 #startRaceBtn,
 #raceAgainBtn {
   font: inherit;
