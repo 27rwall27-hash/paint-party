@@ -118,37 +118,74 @@ function computeSunState(t: number): SunState {
  * low-contrast, and never near the pack's own columns) so they read as ambient scenery rather than
  * competing with the hurdle or runners for attention. Drawn after the ground fill so pyramids'
  * bases sit properly on top of the sand rather than being covered by it. */
+function drawPuffyCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+  // A rounder, fuller cumulus made of several overlapping lobes of varying size (rather than one
+  // flat ellipse with two small side bumps), reading as a proper puffy cloud instead of a blob.
+  const lobes: Array<[number, number, number]> = [
+    [0, 0.15, 0.95],
+    [-r * 1.5, 0.35, 0.65],
+    [-r * 0.75, -0.15, 0.8],
+    [r * 0.75, -0.1, 0.85],
+    [r * 1.5, 0.3, 0.6],
+    [r * 2.2, 0.4, 0.4],
+  ];
+  ctx.beginPath();
+  for (const [dx, dyFrac, scale] of lobes) {
+    ctx.moveTo(cx + dx + r * scale, cy + r * dyFrac);
+    ctx.arc(cx + dx, cy + r * dyFrac, r * scale, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
+function drawBird(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, wingUp: number): void {
+  // A simple black "M" gull silhouette — two shallow arcs meeting at a center dip, wingtips level.
+  // `wingUp` (0..1) raises the peaks and deepens the flap for the "wings up" half of the cycle.
+  const spread = size * (0.9 + wingUp * 0.35);
+  const peakY = y - size * (0.5 + wingUp * 0.9);
+  const dipY = y - size * (0.15 + wingUp * 0.35);
+  ctx.beginPath();
+  ctx.moveTo(x - spread, y);
+  ctx.quadraticCurveTo(x - spread * 0.5, peakY, x, dipY);
+  ctx.quadraticCurveTo(x + spread * 0.5, peakY, x + spread, y);
+  ctx.stroke();
+}
+
 function drawTerrainDecorations(ctx: CanvasRenderingContext2D, terrain: Terrain, y: number, h: number, horizonY: number, now: number): void {
   if (terrain === "grass") {
-    // A couple of soft, static hills on the horizon (same treatment as the pyramids below).
-    ctx.fillStyle = "rgba(70, 130, 60, 0.45)";
-    for (const xFrac of [0.7, 0.85]) {
-      const baseX = CANVAS_W * xFrac;
-      const hillW = h * 0.26;
-      const hillH = h * 0.13;
+    // A single big tree on the horizon.
+    const trunkX = CANVAS_W * 0.76;
+    const trunkH = h * 0.22;
+    const trunkW = Math.max(6, h * 0.03);
+    ctx.fillStyle = "rgba(92, 63, 41, 0.55)";
+    ctx.fillRect(trunkX - trunkW / 2, horizonY - trunkH, trunkW, trunkH);
+
+    ctx.fillStyle = "rgba(55, 110, 48, 0.55)";
+    const canopyR = h * 0.16;
+    const canopyY = horizonY - trunkH - canopyR * 0.55;
+    for (const [dx, dyFrac, scale] of [
+      [0, 0, 1] as const,
+      [-canopyR * 0.8, 0.35, 0.7] as const,
+      [canopyR * 0.8, 0.35, 0.7] as const,
+      [0, -0.5, 0.75] as const,
+    ]) {
       ctx.beginPath();
-      ctx.ellipse(baseX, horizonY, hillW, hillH, 0, Math.PI, 0);
-      ctx.closePath();
+      ctx.arc(trunkX + dx, canopyY + canopyR * dyFrac, canopyR * scale, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // A few soft clouds, high in the sky, drifting almost imperceptibly slowly.
-    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+    // Fuller, puffier clouds, high in the sky, drifting almost imperceptibly slowly.
+    ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
     const clouds: Array<[number, number, number]> = [
-      [0.16, 0.16, 1],
-      [0.4, 0.09, 0.7],
-      [0.6, 0.2, 0.85],
+      [0.14, 0.15, 1.1],
+      [0.38, 0.08, 0.8],
+      [0.58, 0.22, 0.95],
+      [0.82, 0.12, 0.7],
     ];
     for (const [xFrac, yFrac, scale] of clouds) {
       const drift = Math.sin(now / 14000 + xFrac * 9) * 6;
       const cx = CANVAS_W * xFrac + drift;
       const cy = y + h * yFrac;
-      const r = 13 * scale;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, r * 1.6, r * 0.85, 0, 0, Math.PI * 2);
-      ctx.ellipse(cx - r * 0.9, cy + r * 0.25, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
-      ctx.ellipse(cx + r * 0.9, cy + r * 0.25, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
-      ctx.fill();
+      drawPuffyCloud(ctx, cx, cy, 12 * scale);
     }
   } else if (terrain === "beach") {
     // A couple of small, muted, static pyramid silhouettes on the horizon.
@@ -162,6 +199,22 @@ function drawTerrainDecorations(ctx: CanvasRenderingContext2D, terrain: Terrain,
       ctx.lineTo(baseX + pyramidH * 0.95, horizonY);
       ctx.closePath();
       ctx.fill();
+    }
+
+    // A few black birds flapping across the sky.
+    ctx.strokeStyle = "rgba(20, 20, 20, 0.75)";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    const birds: Array<[number, number, number]> = [
+      [0.2, 0.14, 1],
+      [0.3, 0.24, 0.8],
+      [0.48, 0.1, 0.9],
+    ];
+    for (const [xFrac, yFrac, seed] of birds) {
+      const bx = CANVAS_W * xFrac + Math.sin(now / 9000 + seed * 5) * 10;
+      const by = y + h * yFrac;
+      const wingUp = Math.max(0, Math.sin(now / 260 + seed * 10));
+      drawBird(ctx, bx, by, 9, wingUp);
     }
   } else {
     // A jagged glacier silhouette on the horizon (same treatment as the pyramids/hills).
@@ -228,18 +281,63 @@ function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number,
   ctx.restore();
 }
 
-/** A track hurdle sitting on the ground line: two pale posts and a colored crossbar. `groundLineY`
+/** A massive flashing yellow hazard sign plus "NEW RACE STARTING" text, at the far right of a
+ * band — shown for the whole "something big is about to happen" window (see the two call sites:
+ * drawRace's `showWarning` during the pre-split quiet wait, and drawSplitTransition unconditionally
+ * during the cinematic itself). The triangle pulses; the text stays solid/legible throughout. */
+function drawSplitWarningSign(ctx: CanvasRenderingContext2D, y: number, h: number, now: number): void {
+  const pulse = 0.5 + 0.5 * Math.sin((now / 1000) * 5);
+  const cx = CANVAS_W - 110;
+  const cy = y + h * 0.4;
+  const size = Math.min(h * 0.32, 80);
+
+  ctx.save();
+  ctx.globalAlpha = 0.4 + 0.6 * pulse;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - size);
+  ctx.lineTo(cx - size * 0.95, cy + size * 0.75);
+  ctx.lineTo(cx + size * 0.95, cy + size * 0.75);
+  ctx.closePath();
+  ctx.fillStyle = "#ffd60a";
+  ctx.fill();
+  ctx.lineWidth = Math.max(3, size * 0.08);
+  ctx.strokeStyle = "#1b1620";
+  ctx.stroke();
+
+  ctx.fillStyle = "#1b1620";
+  ctx.font = `bold ${Math.round(size * 0.85)}px 'Segoe UI', system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("!", cx, cy + size * 0.2);
+  ctx.restore();
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 15px 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillText("NEW RACE STARTING", cx, cy + size * 0.75 + 10);
+}
+
+/** A track hurdle sitting on the ground line: two pale posts and a colored crossbar. `leftX` is
+ * the LEADING (leftmost) post's x — and deliberately the actual hitbox/reach-time position the
+ * obstacle's approach is computed against (see the call site in drawRace), not the hurdle's
+ * visual center. The obstacle travels right-to-left, so the left post is the edge that reaches
+ * any given column first; drawing the rest of the hurdle's width trailing behind (to the right of)
+ * that post, rather than centered on it, means a runner's column and the hurdle's drawn shape
+ * agree exactly on when contact happens — previously the wider drawn shape visually reached a
+ * runner's column before the (center-based) game logic actually resolved that jump. `groundLineY`
  * is where the ground line is actually DRAWN (groundY + radius + 4 in drawRace, not groundY itself
  * — groundY is the runners' own center point, a few px above their feet). */
-function drawHurdle(ctx: CanvasRenderingContext2D, x: number, groundLineY: number, size: number): void {
+function drawHurdle(ctx: CanvasRenderingContext2D, leftX: number, groundLineY: number, size: number): void {
   const legHeight = size * 2.2;
   const barY = groundLineY - legHeight;
-  const halfWidth = size * 0.9;
+  const width = size * 1.8;
+  const rightX = leftX + width;
 
   ctx.lineCap = "round";
   ctx.strokeStyle = "#e8e2d8";
   ctx.lineWidth = Math.max(2, size * 0.3);
-  for (const legX of [x - halfWidth, x + halfWidth]) {
+  for (const legX of [leftX, rightX]) {
     ctx.beginPath();
     ctx.moveTo(legX, groundLineY);
     ctx.lineTo(legX, barY);
@@ -249,8 +347,8 @@ function drawHurdle(ctx: CanvasRenderingContext2D, x: number, groundLineY: numbe
   ctx.strokeStyle = "#d94b3a";
   ctx.lineWidth = Math.max(3, size * 0.42);
   ctx.beginPath();
-  ctx.moveTo(x - halfWidth, barY);
-  ctx.lineTo(x + halfWidth, barY);
+  ctx.moveTo(leftX, barY);
+  ctx.lineTo(rightX, barY);
   ctx.stroke();
 }
 
@@ -361,11 +459,16 @@ function drawStickFigure(
   }
 
   if (isHuman) {
+    // A red triangle marker pointing down at the head, rather than a ring around it.
+    const markerSize = headRadius * 0.9;
+    const markerY = headY - headRadius - markerSize * 1.3;
     ctx.beginPath();
-    ctx.arc(footX, headY, headRadius + 4, 0, Math.PI * 2);
-    ctx.strokeStyle = "#ffd60a";
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    ctx.moveTo(footX, markerY + markerSize); // bottom tip, pointing down at the head
+    ctx.lineTo(footX - markerSize * 0.8, markerY);
+    ctx.lineTo(footX + markerSize * 0.8, markerY);
+    ctx.closePath();
+    ctx.fillStyle = "#e8291c";
+    ctx.fill();
   }
 
   ctx.beginPath();
@@ -435,7 +538,7 @@ function drawRacerLabel(ctx: CanvasRenderingContext2D, runnerX: number, y: numbe
  * ended and THIS racer's own staggered exit has started (see StampedeSession.finishingAt/
  * finishStaggerRank and exitProgressFor) — at that point jump state is ignored entirely, the racer
  * just runs straight off the right edge. */
-function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number, animNow: number, sun: SunState, terrain: Terrain, getExitT: (identityId: number) => number): void {
+function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number, animNow: number, sun: SunState, terrain: Terrain, getExitT: (identityId: number) => number, showWarning: boolean): void {
   const { groundLineY, headRadius, radius, slotX } = drawBandScene(ctx, y, h, sun, terrain, now);
 
   // The race's obstacle(s) — normally one, rarely two (see MULTI_OBSTACLE_CHANCE) — each slides
@@ -480,6 +583,8 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     drawStickFigure(ctx, runnerX, footY, headRadius, identity.color, animNow, racer.identityId * 1.9, airborne, jumpT, isHuman);
     drawRacerLabel(ctx, runnerX, y, groundLineY, rank, identity.name);
   });
+
+  if (showWarning) drawSplitWarningSign(ctx, y, h, now);
 }
 
 const NO_EXIT = () => 0;
@@ -502,14 +607,15 @@ function drawSplitTransition(ctx: CanvasRenderingContext2D, session: StampedeSes
   const bandCount = transition.toBandCount;
   const pushT = Math.min(1, t / SPLIT_PUSH_IN_MS);
 
-  // Existing bands: real race, real racers, drawn the whole time — only their RECT animates.
+  // Existing bands: real race, real racers, drawn the whole time — only their RECT animates. The
+  // whole transition is "the race splitting", so the warning sign shows in every band throughout.
   for (let i = 0; i < transition.fromBandCount; i++) {
     const from = bandRect(i, transition.fromBandCount);
     const to = bandRect(i, bandCount);
     const y = lerp(from.y, to.y, pushT);
     const h = lerp(from.h, to.h, pushT);
     const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
-    drawRace(ctx, session.races[i]!, identitiesById, y, h, now, animNow, sun, terrain, NO_EXIT);
+    drawRace(ctx, session.races[i]!, identitiesById, y, h, now, animNow, sun, terrain, NO_EXIT, true);
   }
 
   // The brand-new band, if this split adds one (it always does in this game's flow, but stay safe).
@@ -521,10 +627,12 @@ function drawSplitTransition(ctx: CanvasRenderingContext2D, session: StampedeSes
   if (t < SPLIT_PUSH_IN_MS) {
     const y = lerp(CANVAS_H, newRect.y, pushT);
     drawBandScene(ctx, y, newRect.h, sun, terrain, now);
+    drawSplitWarningSign(ctx, y, newRect.h, now);
     return;
   }
 
   const geom = drawBandScene(ctx, newRect.y, newRect.h, sun, terrain, now);
+  drawSplitWarningSign(ctx, newRect.y, newRect.h, now);
   if (t < SPLIT_PUSH_IN_MS + SPLIT_EMPTY_HOLD_MS) return; // empty hold, no runners yet
 
   const runInT = t - SPLIT_PUSH_IN_MS - SPLIT_EMPTY_HOLD_MS;
@@ -655,10 +763,11 @@ export function render(ctx: CanvasRenderingContext2D, session: StampedeSession, 
     drawSplitTransition(ctx, session, identitiesById, sun, now, animNow);
   } else {
     const getExitT = (identityId: number) => exitProgressFor(session, identityId, now);
+    const showWarning = session.pendingSplitAt !== null;
     session.races.forEach((race, i) => {
       const { y, h } = bandRect(i, session.races.length);
       const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
-      drawRace(ctx, race, identitiesById, y, h, now, animNow, sun, terrain, getExitT);
+      drawRace(ctx, race, identitiesById, y, h, now, animNow, sun, terrain, getExitT, showWarning);
     });
   }
 
