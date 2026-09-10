@@ -93,9 +93,15 @@ function drawBird(ctx: CanvasRenderingContext2D, x: number, y: number, size: num
 /** A small, muted set of background decorations per terrain — deliberately subtle (soft/low-count/
  * low-contrast, and never near the pack's own columns) so they read as ambient scenery rather than
  * competing with the hurdle or runners for attention. */
-function drawTerrainDecorations(ctx: CanvasRenderingContext2D, terrain: Terrain, y: number, h: number, horizonY: number, now: number): void {
+function drawTerrainDecorations(ctx: CanvasRenderingContext2D, terrain: Terrain, y: number, h: number, horizonY: number, sun: SunState, now: number): void {
   if (terrain === "grass") {
-    // Fuller, puffier clouds, high in the sky, drifting almost imperceptibly slowly.
+    // Fuller, puffier clouds, high in the sky, drifting almost imperceptibly slowly. The sun's own
+    // position (see drawBandBackground) sweeps across this same sky over the course of a match, so
+    // a cloud at a fixed spot would eventually drift straight through it — skip drawing any cloud
+    // currently overlapping the sun's disc rather than let it visibly clip through.
+    const sunCx = CANVAS_W * sun.xFrac;
+    const sunCy = y + h * sun.yFrac;
+    const sunR = h * 0.24;
     ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
     const clouds: Array<[number, number, number]> = [
       [0.14, 0.15, 1.1],
@@ -107,7 +113,14 @@ function drawTerrainDecorations(ctx: CanvasRenderingContext2D, terrain: Terrain,
       const drift = Math.sin(now / 14000 + xFrac * 9) * 6;
       const cx = CANVAS_W * xFrac + drift;
       const cy = y + h * yFrac;
-      drawPuffyCloud(ctx, cx, cy, 12 * scale);
+      const cloudR = 12 * scale;
+      // Rough bounding radius covering the puffy cloud's outermost lobe (see drawPuffyCloud's
+      // lobes table — the widest lobe sits r*2.2 out with its own r*0.4 radius).
+      const cloudBoundR = cloudR * 2.6;
+      const dx = cx - sunCx;
+      const dy = cy - sunCy;
+      if (Math.hypot(dx, dy) < sunR + cloudBoundR) continue;
+      drawPuffyCloud(ctx, cx, cy, cloudR);
     }
   } else if (terrain === "beach") {
     // A couple of small, muted, static pyramid silhouettes on the horizon.
@@ -198,7 +211,7 @@ function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number,
   ctx.fillStyle = TERRAIN_GROUND_COLOR[terrain];
   ctx.fillRect(0, horizonY, CANVAS_W, Math.max(0, y + h - horizonY));
 
-  drawTerrainDecorations(ctx, terrain, y, h, horizonY, now);
+  drawTerrainDecorations(ctx, terrain, y, h, horizonY, sun, now);
 
   ctx.restore();
 }

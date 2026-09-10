@@ -1,6 +1,7 @@
 import "./style.css";
 import { type BattleRoyaleRacerState, type BattleRoyaleSession, createBattleRoyaleSession, updateBattleRoyaleSession } from "./BattleRoyaleSession.ts";
 import { renderBattleRoyale } from "./battleRoyaleRender.ts";
+import { BR_TICK_REMAINING_THRESHOLD } from "./battleRoyaleConstants.ts";
 import { CANVAS_H } from "./constants.ts";
 import { createBattleRoyaleIdentities, createIdentities } from "./identities.ts";
 import { isAirborne, type RaceRacerState } from "./RaceInstance.ts";
@@ -57,6 +58,10 @@ const wasAirborne = new WeakMap<RaceRacerState, boolean>();
 const wasAirborneBr = new WeakMap<BattleRoyaleRacerState, boolean>();
 let wasFinishing = false;
 let wasFinishingBr = false;
+// Lowest "players remaining" count a tick has already played for — starts above BR_TOTAL_PLAYERS
+// so the very first tick of a fresh game can't accidentally count as a countdown step. Reset on
+// every Start Race click, same as the other per-race flags above.
+let lastBrTickRemaining = Infinity;
 
 function bandIndexForY(y: number, bandCount: number): number {
   const hudHeight = 56;
@@ -101,6 +106,7 @@ startBtn.addEventListener("click", () => {
     brIdentities[0]!.name = identities[0]!.name;
     brIdentities[0]!.color = identities[0]!.color;
     brHumanJumpRequested = false;
+    lastBrTickRemaining = Infinity;
     brSession = createBattleRoyaleSession(brIdentities, performance.now());
   }
 });
@@ -173,6 +179,14 @@ function loop(time: number): void {
     // Same window battleRoyaleRender.ts draws the checkpoint banner in.
     if (brSession.checkpointPauseUntil !== null) sound.startAlarm();
     else sound.stopAlarm();
+
+    // Paint Party's own countdown tick, once per elimination once the field is down to
+    // BR_TICK_REMAINING_THRESHOLD or fewer — "5 remaining", "4 remaining", ... "1 remaining".
+    const brRemaining = brSession.racers.filter((r) => !r.eliminated).length;
+    if (brRemaining <= BR_TICK_REMAINING_THRESHOLD && brRemaining >= 1 && brRemaining < lastBrTickRemaining) {
+      lastBrTickRemaining = brRemaining;
+      sound.playTick();
+    }
 
     renderBattleRoyale(ctx, brSession, time, animClockMs);
     if (brSession.phase === "RESULTS") raceAgainBtn.hidden = false;

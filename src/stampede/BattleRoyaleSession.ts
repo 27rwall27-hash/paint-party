@@ -61,6 +61,12 @@ export interface BattleRoyaleObstacle {
   /** Per-RACER (not per-slot) resolution — 3 different racers (one per section) share the same
    * slot index and each needs their own independent outcome against the identical shared timing. */
   resolvedRacerIds: Set<number>;
+  /** CPUs only — which racers have already had their jump-or-not decision made against THIS
+   * obstacle (see the decision pass in updateBattleRoyaleSession). Separate from resolvedRacerIds
+   * because the decision has to fire well before reach time (so a successful jump has room to rise
+   * naturally on screen instead of popping in mid-air), while resolution still only happens once
+   * reach time actually arrives. */
+  jumpDecidedRacerIds: Set<number>;
 }
 
 export interface BattleRoyaleSession {
@@ -149,15 +155,16 @@ function spawnBrObstacle(session: BattleRoyaleSession, now: number): BattleRoyal
   const mult = brSpeedMultiplier(session);
   const leadInMs = jittered(Math.max(BR_LEAD_IN_FLOOR_MS, BR_LEAD_IN_BASE_MS * mult), BR_TIMING_JITTER);
   const columnGapMs = jittered(Math.max(BR_COLUMN_GAP_FLOOR_MS, BR_COLUMN_GAP_BASE_MS * mult), BR_TIMING_JITTER);
-  // CPU jump decisions are made reactively at resolution time (see updateBattleRoyaleSession),
-  // NOT pre-scheduled here at spawn time like Classic's spawnObstacle does — with stacked
-  // obstacles a racer may need two genuinely separate jumps, and pre-scheduling both up front (one
-  // `jumpStartedAt` per racer, shared across every obstacle in flight) meant a later obstacle's
-  // scheduling could silently overwrite an earlier obstacle's still-pending jump, orphaning it and
-  // causing mass false eliminations — confirmed via a direct test showing eliminations sweeping
-  // slot-by-slot in lockstep with an EARLIER obstacle's own column gap, right after a stacked
-  // SECOND obstacle spawned.
-  return { spawnedAt: now, leadInMs, columnGapMs, resolvedRacerIds: new Set() };
+  // CPU jump decisions are made lazily, per obstacle, in updateBattleRoyaleSession's decision pass —
+  // NOT all up front here at spawn time like an earlier version of this function did. Scheduling
+  // every racer's jump for every obstacle immediately at spawn meant a later STACKED obstacle's
+  // scheduling pass could silently overwrite an earlier obstacle's still-pending jump (one shared
+  // `jumpStartedAt` per racer), orphaning it and causing mass false eliminations — confirmed via a
+  // direct test showing eliminations sweeping slot-by-slot in lockstep with an EARLIER obstacle's
+  // own column gap, right after a stacked SECOND obstacle spawned. Deciding lazily, per obstacle,
+  // keyed off that obstacle's own reach time, sidesteps the overwrite entirely (see
+  // jumpDecidedRacerIds).
+  return { spawnedAt: now, leadInMs, columnGapMs, resolvedRacerIds: new Set(), jumpDecidedRacerIds: new Set() };
 }
 
 /** A wave has a chance to stack a 2nd hurdle close behind the 1st, and (only if it did) a smaller
@@ -214,6 +221,24 @@ export function updateBattleRoyaleSession(session: BattleRoyaleSession, now: num
   // with nobody left to declare.
   let gameOver = false;
   obstacleLoop: for (const obstacle of [...session.obstacles]) {
+    // CPU jump-decision pass — fires once per racer, BR_FIXED_JUMP_AIRTIME_MS * 0.6 before this
+    // obstacle's own reach time (the same lead Classic's spawn-time scheduling gives its jumps —
+    // see RaceInstance.spawnObstacle), so a successful roll gets a real jumpStartedAt sitting in the
+    // future relative to the moment it's set. The render loop then naturally animates the rise frame
+    // by frame as `now` catches up to it, instead of the jump being decided (and so only rendered)
+    // at the reach instant itself, which was popping CPUs straight into an already-near-peak pose
+    // with no visible rise — reported as "the cpus jumping very weird".
+    for (const racer of session.racers) {
+      if (racer.eliminated || racer.identityId === 0) continue;
+      if (obstacle.jumpDecidedRacerIds.has(racer.identityId)) continue;
+      const reachAt = reachTimeForSlot(obstacle, racer.slot);
+      const decideAt = reachAt - BR_FIXED_JUMP_AIRTIME_MS * 0.6;
+      if (now < decideAt) continue;
+      obstacle.jumpDecidedRacerIds.add(racer.identityId);
+      if (isAirborne(racer, now)) continue; // already covering it via an earlier stacked jump
+      if (Math.random() < racer.cpuSkill) racer.jumpStartedAt = decideAt;
+    }
+
     for (const racer of session.racers) {
       if (racer.eliminated) continue;
       if (obstacle.resolvedRacerIds.has(racer.identityId)) continue;
@@ -221,23 +246,10 @@ export function updateBattleRoyaleSession(session: BattleRoyaleSession, now: num
       if (now < reachAt) continue;
       obstacle.resolvedRacerIds.add(racer.identityId);
 
-      let cleared: boolean;
-      if (racer.identityId === 0) {
-        // Human: purely their own click-driven jumpStartedAt.
-        cleared = isAirborne(racer, now) && now - racer.jumpStartedAt >= MIN_AIRBORNE_BEFORE_CONTACT_MS;
-      } else if (isAirborne(racer, now) && now - racer.jumpStartedAt >= MIN_AIRBORNE_BEFORE_CONTACT_MS) {
-        // Already mid-jump with enough margin — e.g. one long jump spanning two closely-stacked
-        // obstacles. That coverage counts for free, no new roll needed.
-        cleared = true;
-      } else if (Math.random() < racer.cpuSkill) {
-        // Decided fresh, right at this obstacle's own resolve moment — sets the jump animation to
-        // land with the same "peak roughly at reach time" shape Classic's advance-scheduled jumps
-        // use, just computed reactively instead of speculatively at spawn time.
-        racer.jumpStartedAt = reachAt - BR_FIXED_JUMP_AIRTIME_MS * 0.6;
-        cleared = true;
-      } else {
-        cleared = false;
-      }
+      // Human and CPU alike: did they land here airborne, with enough margin, from whatever jump
+      // (human: click-driven; CPU: this obstacle's own decision pass above, or an earlier stacked
+      // obstacle's still-in-flight jump) is currently active.
+      const cleared = isAirborne(racer, now) && now - racer.jumpStartedAt >= MIN_AIRBORNE_BEFORE_CONTACT_MS;
 
       if (!cleared) {
         racer.eliminated = true;

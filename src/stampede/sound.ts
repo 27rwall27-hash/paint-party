@@ -146,3 +146,24 @@ export function playLeap(isHuman: boolean): void {
     synthLeapBlip(volume);
   }
 }
+
+/** The same short countdown-tick blip Paint Party plays once per second in a round's closing
+ * seconds (see game/audio.ts's playTick) — reused here in Battle Royale for the "5 players
+ * remaining" countdown (see main.ts), so the two games share the exact same cue for "down to the
+ * wire". Synthesized, not a custom.* file, matching Paint Party's own tick (no audio file there
+ * either). */
+export function playTick(): void {
+  if (!audioCtx) audioCtx = new AudioContext();
+  const ctx = audioCtx;
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "square";
+  osc.frequency.value = 1500;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(0.385, t0 + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.06);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.08);
+}

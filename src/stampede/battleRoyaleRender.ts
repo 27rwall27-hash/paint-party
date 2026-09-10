@@ -1,5 +1,5 @@
 import { BR_ELIMINATION_FLY_MS, BR_SECTIONS, BR_SLOTS_PER_SECTION, BR_TOTAL_PLAYERS } from "./battleRoyaleConstants.ts";
-import { BR_FIXED_JUMP_ARC_HEIGHT_PX, obstacleProgress, type BattleRoyaleSession } from "./BattleRoyaleSession.ts";
+import { BR_FIXED_JUMP_ARC_HEIGHT_PX, type BattleRoyaleObstacle, type BattleRoyaleSession } from "./BattleRoyaleSession.ts";
 import { CANVAS_H, CANVAS_W } from "./constants.ts";
 import type { RacerIdentity } from "./identities.ts";
 import { isAirborne } from "./RaceInstance.ts";
@@ -9,6 +9,29 @@ import { bandRect, computeSunState, drawBandScene, drawHurdle, drawRacerLabel, d
  * sky reads more dramatic/sunset-y the closer the match gets to a single survivor. */
 function battleRoyaleSunT(session: BattleRoyaleSession): number {
   return Math.min(1, session.totalEliminated / (BR_TOTAL_PLAYERS - 1));
+}
+
+/** The obstacle's leading-edge x, exactly aligned with reachTimeForSlot so the drawn hurdle is
+ * physically over a racer's column at the precise instant that racer's fate resolves — not just a
+ * naive two-point lerp from spawnX to the last column, which (since spawnX/targetX are pure screen
+ * geometry with no relationship to the independently-tuned leadInMs/columnGapMs) drifted the
+ * hurdle's drawn position tens of pixels away from a racer's own column at their actual reach
+ * time, reported as "the hurdle hit box just doesn't seem right". Two segments:
+ *  1. Before the first column's reach time — purely cosmetic approach from spawnX, nobody's fate
+ *     is decided yet so exact alignment doesn't matter here, just a smooth lerp to slotX(last).
+ *  2. From the first column's reach time onward — slotX is an affine (linear) function of slot, so
+ *     feeding it the exact fractional "continuous slot" implied by elapsed time reproduces every
+ *     racer's exact column position at their exact reachTimeForSlot, by construction. */
+function obstacleLeadingEdgeX(obstacle: BattleRoyaleObstacle, now: number, spawnX: number, slotX: (slot: number) => number): number {
+  const lastColumnX = slotX(BR_SLOTS_PER_SECTION - 1);
+  const elapsed = now - obstacle.spawnedAt;
+  if (elapsed <= obstacle.leadInMs) {
+    const t = obstacle.leadInMs > 0 ? elapsed / obstacle.leadInMs : 1;
+    return spawnX + Math.min(1, Math.max(0, t)) * (lastColumnX - spawnX);
+  }
+  const continuousSlot = (elapsed - obstacle.leadInMs) / obstacle.columnGapMs;
+  const clamped = Math.min(BR_SLOTS_PER_SECTION - 1, Math.max(0, continuousSlot));
+  return slotX(BR_SLOTS_PER_SECTION - 1 - clamped);
 }
 
 function drawBrHud(ctx: CanvasRenderingContext2D, session: BattleRoyaleSession): void {
@@ -131,10 +154,8 @@ export function renderBattleRoyale(ctx: CanvasRenderingContext2D, session: Battl
 
     // Obstacles are shared/identical across every section — same wave, same position, everywhere.
     for (const obstacle of session.obstacles) {
-      const progress = obstacleProgress(obstacle, now);
       const spawnX = CANVAS_W - 24;
-      const targetX = slotX(0);
-      const obstacleX = spawnX + progress * (targetX - spawnX);
+      const obstacleX = obstacleLeadingEdgeX(obstacle, now, spawnX, slotX);
       drawHurdle(ctx, obstacleX, groundLineY, Math.max(9, radius * 0.75));
     }
 

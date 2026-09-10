@@ -52,3 +52,8 @@ export const BR_CHECKPOINT_SPEED_STEP_PCT = 0.09;
 // How long an eliminated racer's fly-off-screen animation takes before they stop being drawn
 // entirely.
 export const BR_ELIMINATION_FLY_MS = 650;
+
+// Once the field is down to this many players or fewer, main.ts plays Paint Party's own countdown
+// tick (sound.playTick) once per further elimination — "5 remaining", "4 remaining", ... "1
+// remaining" — the same down-to-the-wire cue Paint Party uses for a round's last 5 seconds.
+export const BR_TICK_REMAINING_THRESHOLD = 5;
