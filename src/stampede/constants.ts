@@ -179,8 +179,10 @@ export const CPU_SKILL_JITTER = 0.08;
 // Leap sound effect — plays the instant a racer actually leaves the ground (not when a CPU's jump
 // is merely scheduled ahead of time). Loud for the human's own jumps, very soft for CPUs, so the
 // player's own timing has an audible cue without the pack turning into a wall of jump noise.
-export const LEAP_VOLUME_HUMAN = 0.9;
-export const LEAP_VOLUME_CPU = 0.12;
+// (0.9 * 1.1 for the human, 0.12 * 0.8 for CPUs, per direct feedback that the first pass wasn't
+// loud/soft enough in each direction.)
+export const LEAP_VOLUME_HUMAN = 0.99;
+export const LEAP_VOLUME_CPU = 0.096;
 
 // Background music — loops for the whole game, ramping 10% faster every 10 seconds (compounding),
 // capped so it never runs away into an unlistenable chipmunk-speed screech by the end of a long
@@ -189,3 +191,19 @@ export const MUSIC_VOLUME = 0.5;
 export const MUSIC_SPEED_STEP_PCT = 0.1;
 export const MUSIC_SPEED_INTERVAL_MS = 10_000;
 export const MUSIC_SPEED_MAX_MULTIPLIER = 2.85;
+
+// The moment THREE_WAY's nominal duration is reached, the game doesn't cut straight to the
+// RESULTS overlay — every racer sprints off the right edge first (see StampedeSession.finishingAt/
+// render.ts), then RESULTS actually begins once they're clear.
+export const RESULTS_EXIT_RUN_MS = 850;
+
+// The split "push in" cinematic (see StampedeSession.SplitTransition/render.ts's
+// drawSplitTransition): the current layout gradually reflows into the new, smaller-band layout
+// (PUSH_IN), settles on an empty new scene for a beat (EMPTY_HOLD), then all 8 racers sprint in
+// from off-screen one rank at a time (STAGGER between each rank starting, RUN_IN for each one's
+// own run). No obstacle spawning or phase timers advance during any of this — it's a fully frozen
+// cinematic beat, not something to react to.
+export const SPLIT_PUSH_IN_MS = 700;
+export const SPLIT_EMPTY_HOLD_MS = 450;
+export const SPLIT_RUNNER_STAGGER_MS = 130;
+export const SPLIT_RUNNER_RUN_IN_MS = 550;

@@ -23,12 +23,19 @@ let session: StampedeSession | null = null;
 // (reset to false) at the end of every tick, regardless of whether it actually caused a jump.
 let pendingJumps: boolean[] = [];
 let musicStartedAt = 0;
+// A separate, speed-ramped clock (see sound.speedMultiplierAt) that drives ONLY the sprinting-in-
+// place run cycle's visual speed — accumulates dt*currentMultiplier every frame rather than being
+// derived directly from real time, so it integrates correctly as the multiplier ramps up instead
+// of jumping discontinuously. Real jump timing/difficulty stays on the real clock untouched.
+let animClockMs = 0;
 // Tracks each racer's airborne state as of the last tick, so a leap sound plays exactly once per
 // jump — the instant a racer actually leaves the ground, not when a CPU's jump is merely scheduled
 // ahead of time (see RaceInstance.spawnObstacle). A WeakMap naturally handles racers cloned fresh
 // at a split (new objects just aren't in it yet, correctly treated as "not airborne" until proven
 // otherwise) without needing any manual cleanup.
 const wasAirborne = new WeakMap<RaceRacerState, boolean>();
+// Fires the finish cue exactly once, the instant the game ends (see StampedeSession.finishingAt).
+let wasFinishing = false;
 
 function bandIndexForY(y: number, bandCount: number): number {
   const hudHeight = 56;
@@ -51,7 +58,10 @@ startBtn.addEventListener("click", () => {
   setupPanel.hidden = true;
   raceAgainBtn.hidden = true;
   musicStartedAt = performance.now();
+  animClockMs = 0;
+  wasFinishing = false;
   sound.startMusic();
+  sound.playStart();
 });
 
 raceAgainBtn.addEventListener("click", () => {
@@ -83,9 +93,16 @@ function loop(time: number): void {
         wasAirborne.set(racer, airborneNow);
       }
     }
-    sound.updateMusicSpeed(time - musicStartedAt);
 
-    render(ctx, session, time);
+    const speedMultiplier = sound.speedMultiplierAt(time - musicStartedAt);
+    sound.updateMusicSpeed(time - musicStartedAt);
+    animClockMs += dt * 1000 * speedMultiplier;
+
+    const isFinishing = session.finishingAt !== null;
+    if (isFinishing && !wasFinishing) sound.playFinish();
+    wasFinishing = isFinishing;
+
+    render(ctx, session, time, animClockMs);
     if (session.phase === "RESULTS") raceAgainBtn.hidden = false;
   }
 

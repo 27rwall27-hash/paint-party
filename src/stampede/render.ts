@@ -7,7 +7,12 @@ import {
   PACK_WIDTH_FRACTION,
   POINTS_BY_RANK,
   RACER_COUNT,
+  RESULTS_EXIT_RUN_MS,
   SINGLE_PHASE_MS,
+  SPLIT_EMPTY_HOLD_MS,
+  SPLIT_PUSH_IN_MS,
+  SPLIT_RUNNER_RUN_IN_MS,
+  SPLIT_RUNNER_STAGGER_MS,
   THREE_WAY_PHASE_MS,
   TWO_WAY_PHASE_MS,
 } from "./constants.ts";
@@ -344,7 +349,10 @@ function drawStickFigure(
   ctx.stroke();
 }
 
-function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number, sun: SunState, terrain: Terrain): void {
+/** Shared column/ground-line geometry for a band of the given rect — factored out since the split
+ * transition's push-in/empty-hold/run-in phases (see drawSplitTransition) all need the same
+ * layout math as normal gameplay rendering, just fed different (sometimes animating) y/h values. */
+function bandGeometry(y: number, h: number): { groundLineY: number; headRadius: number; radius: number; slotX: (slot: number) => number } {
   // The 8 racers cluster near the left of the band (not spread across its full width) — leaves a
   // long, clearly visible runway on the right where the obstacle is approaching from, and keeps
   // the pack itself tight.
@@ -361,16 +369,45 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   // The stick figure's head — smaller than the old plain-circle radius since the whole figure
   // (head + torso + legs) needs more total vertical room than a circle alone did.
   const headRadius = radius * 0.55;
+  const slotX = (slot: number) => packLeft + slot * (colWidth + COLUMN_GAP) + colWidth / 2;
+  return { groundLineY, headRadius, radius, slotX };
+}
 
-  drawBandBackground(ctx, y, h, groundLineY, sun, terrain, now);
-
+/** Background + ground line only, no obstacle/racers — the part every band-rendering path (normal
+ * gameplay, and every phase of the split transition) shares. */
+function drawBandScene(ctx: CanvasRenderingContext2D, y: number, h: number, sun: SunState, terrain: Terrain, now: number): ReturnType<typeof bandGeometry> {
+  const geom = bandGeometry(y, h);
+  drawBandBackground(ctx, y, h, geom.groundLineY, sun, terrain, now);
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.beginPath();
-  ctx.moveTo(0, groundLineY);
-  ctx.lineTo(CANVAS_W, groundLineY);
+  ctx.moveTo(0, geom.groundLineY);
+  ctx.lineTo(CANVAS_W, geom.groundLineY);
   ctx.stroke();
+  return geom;
+}
 
-  const slotX = (slot: number) => packLeft + slot * (colWidth + COLUMN_GAP) + colWidth / 2;
+function drawRacerLabel(ctx: CanvasRenderingContext2D, runnerX: number, y: number, groundLineY: number, rank: number, name: string): void {
+  ctx.fillStyle = "rgba(255,255,255,0.4)";
+  ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(`${rank + 1}`, runnerX, y + 14);
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillText(name, runnerX, groundLineY + 8);
+}
+
+/** `animNow` drives ONLY the sprinting-in-place run cycle (see drawStickFigure) — it's a separate,
+ * speed-ramped clock from `now` (see main.ts's animClockMs) so the visible running animation
+ * speeds up in lockstep with the music, without touching actual jump timing/difficulty, which
+ * stays on the real game clock. `exitT` (0..1) is nonzero only once the game has ended and every
+ * racer is sprinting off the right edge (see StampedeSession.finishingAt) — at that point jump
+ * state is ignored entirely, racers just run straight off screen. */
+function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number, animNow: number, sun: SunState, terrain: Terrain, exitT: number): void {
+  const { groundLineY, headRadius, radius, slotX } = drawBandScene(ctx, y, h, sun, terrain, now);
 
   // The race's obstacle(s) — normally one, rarely two (see MULTI_OBSTACLE_CHANCE) — each slides
   // from near the band's right edge to the pack's own leftmost column, reaching each racer at a
@@ -392,32 +429,93 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     // rejoin the horizontal line at the back". Also the order the shared obstacle reaches
     // them in: rightmost (1st place) first, leftmost (last place) last. racer.displaySlot
     // slides toward this target rather than snapping to it — see RaceInstance.updateRace.
-    const runnerX = slotX(racer.displaySlot);
+    let runnerX = slotX(racer.displaySlot);
     const isHuman = identity.id === 0;
 
-    const airborne = isAirborne(racer, now);
+    let airborne = false;
     let jumpT = 0;
     let jumpOffset = 0;
-    if (airborne) {
-      const t = Math.min(1, Math.max(0, (now - racer.jumpStartedAt) / racer.jumpAirtimeMs));
-      jumpT = Math.sin(t * Math.PI); // 0 at takeoff/landing, 1 at the peak — also drives the leap pose
-      jumpOffset = -jumpT * racer.jumpArcHeightPx;
+    if (exitT > 0) {
+      runnerX = lerp(runnerX, CANVAS_W + 150, exitT);
+    } else {
+      airborne = isAirborne(racer, now);
+      if (airborne) {
+        const t = Math.min(1, Math.max(0, (now - racer.jumpStartedAt) / racer.jumpAirtimeMs));
+        jumpT = Math.sin(t * Math.PI); // 0 at takeoff/landing, 1 at the peak — also drives the leap pose
+        jumpOffset = -jumpT * racer.jumpArcHeightPx;
+      }
     }
     const footY = groundLineY + jumpOffset;
 
-    drawStickFigure(ctx, runnerX, footY, headRadius, identity.color, now, racer.identityId * 1.9, airborne, jumpT, isHuman);
+    drawStickFigure(ctx, runnerX, footY, headRadius, identity.color, animNow, racer.identityId * 1.9, airborne, jumpT, isHuman);
+    drawRacerLabel(ctx, runnerX, y, groundLineY, rank, identity.name);
+  });
+}
 
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`${rank + 1}`, runnerX, y + 14);
+/** The push-in/empty-scene/runners-file-in cinematic that now plays at every split instead of the
+ * layout just snapping straight to the new, smaller bands (see StampedeSession.SplitTransition).
+ * Three phases back to back, all timed from `transition.startedAt`:
+ *   1. PUSH_IN — existing bands reflow from the old layout to the new one; the brand-new band (if
+ *      any) slides up into place from below. No racers drawn at all.
+ *   2. EMPTY_HOLD — final layout, fully settled, still no racers — a beat of "empty track" before
+ *      anyone appears.
+ *   3. Run-in — every rank's racer sprints in from off-screen left into its slot, one rank at a
+ *      time across ALL bands simultaneously (so e.g. every band's current 1st place dashes in
+ *      together, then every 2nd place, and so on). */
+function drawSplitTransition(ctx: CanvasRenderingContext2D, session: StampedeSession, identitiesById: Map<number, RacerIdentity>, sun: SunState, now: number, animNow: number): void {
+  const transition = session.transition!;
+  const t = now - transition.startedAt;
+  const bandCount = transition.toBandCount;
 
-    ctx.fillStyle = "#fff";
-    ctx.font = "11px 'Segoe UI', system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText(identity.name, runnerX, groundLineY + 8);
+  if (t < SPLIT_PUSH_IN_MS) {
+    const pushT = t / SPLIT_PUSH_IN_MS;
+    for (let i = 0; i < bandCount; i++) {
+      const to = bandRect(i, bandCount);
+      let y: number;
+      let h: number;
+      if (i < transition.fromBandCount) {
+        const from = bandRect(i, transition.fromBandCount);
+        y = lerp(from.y, to.y, pushT);
+        h = lerp(from.h, to.h, pushT);
+      } else {
+        // The brand-new band slides up into place from just below the visible area.
+        y = lerp(CANVAS_H, to.y, pushT);
+        h = to.h;
+      }
+      const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
+      drawBandScene(ctx, y, h, sun, terrain, now);
+    }
+    return;
+  }
+
+  const bands = Array.from({ length: bandCount }, (_, i) => bandRect(i, bandCount));
+
+  if (t < SPLIT_PUSH_IN_MS + SPLIT_EMPTY_HOLD_MS) {
+    bands.forEach((rect, i) => {
+      const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
+      drawBandScene(ctx, rect.y, rect.h, sun, terrain, now);
+    });
+    return;
+  }
+
+  const runInT = t - SPLIT_PUSH_IN_MS - SPLIT_EMPTY_HOLD_MS;
+  bands.forEach((rect, i) => {
+    const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
+    const geom = drawBandScene(ctx, rect.y, rect.h, sun, terrain, now);
+    // Bands that already existed keep rendering straight from their real, live race; only the
+    // brand-new band (which has no RaceInstance yet) uses the snapshot captured at transition
+    // start (see StampedeSession.SplitTransition.newBandOrder).
+    const order: RacerIdentity[] = i < transition.fromBandCount ? session.races[i]!.racers.map((r) => identitiesById.get(r.identityId)!) : transition.newBandOrder;
+
+    order.forEach((identity, rank) => {
+      const startAt = rank * SPLIT_RUNNER_STAGGER_MS;
+      if (runInT < startAt) return;
+      const localT = Math.min(1, (runInT - startAt) / SPLIT_RUNNER_RUN_IN_MS);
+      const targetX = geom.slotX(RACER_COUNT - 1 - rank);
+      const runnerX = lerp(-80, targetX, localT);
+      drawStickFigure(ctx, runnerX, geom.groundLineY, geom.headRadius, identity.color, animNow, identity.id * 1.9, false, 0, identity.id === 0);
+      drawRacerLabel(ctx, runnerX, rect.y, geom.groundLineY, rank, identity.name);
+    });
   });
 }
 
@@ -431,10 +529,10 @@ function drawHud(ctx: CanvasRenderingContext2D, session: StampedeSession, now: n
   ctx.textBaseline = "middle";
   ctx.fillText(PHASE_LABEL[session.phase] ?? session.phase, 20, HUD_HEIGHT / 2);
 
-  if (session.pendingSplitAt !== null) {
+  if (session.pendingSplitAt !== null || session.transition !== null) {
     // Pulsing warning instead of the normal countdown — obstacle spawning is suppressed and the
-    // split is waiting out a genuine quiet period (see StampedeSession.maybeSplit), so a plain
-    // "0s" would be misleading here.
+    // split is either waiting out a genuine quiet period or already mid-transition (see
+    // StampedeSession.maybeSplit/SplitTransition), so a plain "0s" would be misleading here.
     const pulse = 0.55 + 0.45 * Math.sin((now / 1000) * 6);
     ctx.fillStyle = `rgba(255, 138, 61, ${pulse.toFixed(2)})`;
     ctx.font = "bold 14px 'Segoe UI', system-ui, sans-serif";
@@ -510,17 +608,27 @@ function drawResults(ctx: CanvasRenderingContext2D, session: StampedeSession): v
   });
 }
 
-export function render(ctx: CanvasRenderingContext2D, session: StampedeSession, now: number): void {
+/** `animNow` is a separate, speed-ramped clock (see main.ts's animClockMs) that drives ONLY the
+ * sprinting-in-place run cycle, so the visible running animation speeds up in lockstep with the
+ * music without touching actual jump timing. Defaults to `now` so callers that don't care about
+ * music speed (e.g. tests) still get a normal-speed animation. */
+export function render(ctx: CanvasRenderingContext2D, session: StampedeSession, now: number, animNow: number = now): void {
   ctx.fillStyle = "#1b1620";
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   const identitiesById = new Map(session.identities.map((i) => [i.id, i]));
   const sun = computeSunState(sessionProgress(session, now));
-  session.races.forEach((race, i) => {
-    const { y, h } = bandRect(i, session.races.length);
-    const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
-    drawRace(ctx, race, identitiesById, y, h, now, sun, terrain);
-  });
+
+  if (session.transition) {
+    drawSplitTransition(ctx, session, identitiesById, sun, now, animNow);
+  } else {
+    const exitT = session.finishingAt !== null ? Math.min(1, (now - session.finishingAt) / RESULTS_EXIT_RUN_MS) : 0;
+    session.races.forEach((race, i) => {
+      const { y, h } = bandRect(i, session.races.length);
+      const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
+      drawRace(ctx, race, identitiesById, y, h, now, animNow, sun, terrain, exitT);
+    });
+  }
 
   drawHud(ctx, session, now);
 

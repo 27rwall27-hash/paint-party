@@ -1,15 +1,17 @@
-// Two audio sources: stampede-music.wav / stampede-leap.wav dropped into public/audio/ (see
+// Audio sources: stampede-music.wav / stampede-leap.wav dropped into public/audio/ (see
 // customAudio.ts), or a tiny synthesized fallback for the leap sound only — there's no
 // synthesized fallback track for music, so the game is simply quiet until a music file is
-// provided.
+// provided. start.wav/finish.wav intentionally reuse Paint Party's own files rather than needing
+// Stampede-specific copies (per direct request) — silent if those happen to be missing too.
 //
 // Music loops for the whole game and ramps MUSIC_SPEED_STEP_PCT faster every
-// MUSIC_SPEED_INTERVAL_MS (compounding), capped at MUSIC_SPEED_MAX_MULTIPLIER.
+// MUSIC_SPEED_INTERVAL_MS (compounding), capped at MUSIC_SPEED_MAX_MULTIPLIER — and stops the
+// instant the finish cue finishes playing (see playFinish).
 
 import { LEAP_VOLUME_CPU, LEAP_VOLUME_HUMAN, MUSIC_SPEED_INTERVAL_MS, MUSIC_SPEED_MAX_MULTIPLIER, MUSIC_SPEED_STEP_PCT, MUSIC_VOLUME } from "./constants.ts";
 import { loadCustomAudio, type StampedeCustomAudio } from "./customAudio.ts";
 
-let custom: StampedeCustomAudio = { music: null, leap: null };
+let custom: StampedeCustomAudio = { music: null, leap: null, start: null, finish: null };
 let musicStarted = false;
 let audioCtx: AudioContext | null = null;
 
@@ -45,27 +47,66 @@ export function stopMusic(): void {
   musicStarted = false;
 }
 
+/** Pure function, also used directly by main.ts to drive the run-cycle animation's own speed-
+ * ramped clock (see main.ts's animClockMs) so the visible running animation and the music tempo
+ * are always reading off the exact same schedule. */
+export function speedMultiplierAt(elapsedMs: number): number {
+  const steps = Math.floor(Math.max(0, elapsedMs) / MUSIC_SPEED_INTERVAL_MS);
+  return Math.min(MUSIC_SPEED_MAX_MULTIPLIER, (1 + MUSIC_SPEED_STEP_PCT) ** steps);
+}
+
 /** Call every frame with elapsed ms since startMusic() — a no-op if there's no music playing. */
 export function updateMusicSpeed(elapsedMs: number): void {
   if (!custom.music || !musicStarted) return;
-  const steps = Math.floor(Math.max(0, elapsedMs) / MUSIC_SPEED_INTERVAL_MS);
-  const rate = Math.min(MUSIC_SPEED_MAX_MULTIPLIER, (1 + MUSIC_SPEED_STEP_PCT) ** steps);
-  custom.music.playbackRate = rate;
+  custom.music.playbackRate = speedMultiplierAt(elapsedMs);
 }
 
+/** Plays right when a race begins. */
+export function playStart(): void {
+  if (!custom.start) return;
+  custom.start.currentTime = 0;
+  void custom.start.play().catch(() => {});
+}
+
+/** Plays the instant the game ends — and stops the background music the moment THIS finishes
+ * playing (not immediately), so the finish cue rings out over the music rather than cutting it
+ * off mid-note. If there's no finish.wav to wait on, music just stops right away instead. */
+export function playFinish(): void {
+  if (!custom.finish) {
+    stopMusic();
+    return;
+  }
+  custom.finish.currentTime = 0;
+  custom.finish.addEventListener("ended", () => stopMusic(), { once: true });
+  void custom.finish.play().catch(() => stopMusic());
+}
+
+/** A quick downward "hop" chirp (triangle sweep + a short square click layered on top) — the
+ * fallback used when no stampede-leap.wav is provided. */
 function synthLeapBlip(volume: number): void {
   if (!audioCtx) audioCtx = new AudioContext();
   const ctx = audioCtx;
+
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(520, ctx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.08);
+  osc.type = "triangle";
+  osc.frequency.setValueAtTime(780, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(340, ctx.currentTime + 0.1);
   gain.gain.setValueAtTime(volume, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.13);
   osc.connect(gain).connect(ctx.destination);
   osc.start();
-  osc.stop(ctx.currentTime + 0.16);
+  osc.stop(ctx.currentTime + 0.14);
+
+  const click = ctx.createOscillator();
+  const clickGain = ctx.createGain();
+  click.type = "square";
+  click.frequency.setValueAtTime(1400, ctx.currentTime);
+  clickGain.gain.setValueAtTime(volume * 0.25, ctx.currentTime);
+  clickGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
+  click.connect(clickGain).connect(ctx.destination);
+  click.start();
+  click.stop(ctx.currentTime + 0.05);
 }
 
 /** Plays the instant a racer actually leaves the ground — see main.ts's airborne-transition
