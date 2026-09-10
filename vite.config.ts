@@ -8,6 +8,7 @@ export default defineConfig({
         suite: fileURLToPath(new URL("./index.html", import.meta.url)),
         paintParty: fileURLToPath(new URL("./paint-party/index.html", import.meta.url)),
         stampedeSprint: fileURLToPath(new URL("./stampede-sprint/index.html", import.meta.url)),
+        lightMaze: fileURLToPath(new URL("./light-maze/index.html", import.meta.url)),
       },
     },
   },

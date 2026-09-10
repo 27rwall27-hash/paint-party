@@ -1,0 +1,116 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: #1b1620;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  padding: 18px 0 32px;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(96vw, 1280px);
+  gap: 10px;
+}
+
+#backToSuite {
+  align-self: flex-start;
+  color: #a99fb3;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+#backToSuite:hover {
+  color: #ffd60a;
+}
+
+#maze {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1280 / 720;
+  border-radius: 4px;
+  box-shadow: 0 16px 46px rgba(0, 0, 0, 0.5);
+  cursor: crosshair;
+}
+
+#setupPanel {
+  width: 100%;
+  background: #241f29;
+  color: #eee;
+  border-radius: 10px;
+  padding: 14px 16px;
+  font-size: 14px;
+}
+
+.settingsHint {
+  opacity: 0.75;
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+
+.settingsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#setupPanel input[type="text"] {
+  flex: 1 1 260px;
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #453e4e;
+  background: #17131c;
+  color: #fff;
+}
+
+.colorPicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 14px;
+}
+
+.colorSwatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.colorSwatch.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #241f29, 0 0 0 4px #ffd60a;
+}
+
+#startMazeBtn,
+#playAgainBtn {
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 20px;
+  border-radius: 6px;
+  border: none;
+  background: #ffd60a;
+  color: #241f29;
+  cursor: pointer;
+}
