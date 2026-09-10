@@ -145,7 +145,15 @@ export function renderBattleRoyale(ctx: CanvasRenderingContext2D, session: Battl
       const identity = identitiesById.get(racer.identityId);
       if (!identity) continue;
       const isHuman = identity.id === 0;
-      let runnerX = slotX(racer.slot);
+      // The obstacle sweeps right-to-left toward slotX(0) (see targetX above), so it reaches the
+      // RIGHTMOST column first and the leftmost last — but reachTimeForSlot treats slot 0 as
+      // reached FIRST (soonest). Flipping the visual column here (same "displaySlot = COUNT-1-x"
+      // convention Classic mode uses) is what makes the two agree: slot 0 (reached first) draws
+      // rightmost, slot 7 (reached last) draws leftmost. Left unflipped, CPUs jumped in the
+      // correct logical order but at the visually wrong end of the sweep — exactly the "jumping
+      // back to front, perfectly flipped" bug this fixes.
+      const visualSlot = BR_SLOTS_PER_SECTION - 1 - racer.slot;
+      let runnerX = slotX(visualSlot);
 
       let airborne = false;
       let jumpT = 0;
