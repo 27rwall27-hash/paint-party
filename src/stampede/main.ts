@@ -69,6 +69,7 @@ raceAgainBtn.addEventListener("click", () => {
   setupPanel.hidden = false;
   raceAgainBtn.hidden = true;
   sound.stopMusic();
+  sound.stopAlarm();
 });
 
 let lastTime = performance.now();
@@ -101,6 +102,11 @@ function loop(time: number): void {
     const isFinishing = session.finishingAt !== null;
     if (isFinishing && !wasFinishing) sound.playFinish();
     wasFinishing = isFinishing;
+
+    // Same condition render.ts uses to draw the split-warning sign — the alarm plays for exactly
+    // as long as that sign is on screen.
+    if (session.pendingSplitAt !== null || session.transition !== null) sound.startAlarm();
+    else sound.stopAlarm();
 
     render(ctx, session, time, animClockMs);
     if (session.phase === "RESULTS") raceAgainBtn.hidden = false;

@@ -9,11 +9,12 @@
 // MUSIC_SPEED_MAX_MULTIPLIER — and stops the instant the finish cue finishes playing (see
 // playFinish).
 
-import { LEAP_VOLUME_CPU, LEAP_VOLUME_HUMAN, MUSIC_SPEED_INTERVAL_MS, MUSIC_SPEED_MAX_MULTIPLIER, MUSIC_SPEED_STEP_PCT, MUSIC_VOLUME, START_FINISH_VOLUME } from "./constants.ts";
+import { ALARM_VOLUME, LEAP_VOLUME_CPU, LEAP_VOLUME_HUMAN, MUSIC_SPEED_INTERVAL_MS, MUSIC_SPEED_MAX_MULTIPLIER, MUSIC_SPEED_STEP_PCT, MUSIC_VOLUME, START_FINISH_VOLUME } from "./constants.ts";
 import { loadCustomAudio, type StampedeCustomAudio } from "./customAudio.ts";
 
-let custom: StampedeCustomAudio = { music: null, leap: null, start: null, finish: null };
+let custom: StampedeCustomAudio = { music: null, leap: null, start: null, finish: null, alarm: null };
 let musicStarted = false;
+let alarmPlaying = false;
 let audioCtx: AudioContext | null = null;
 
 export function init(): void {
@@ -25,6 +26,10 @@ export function init(): void {
     }
     if (custom.start) custom.start.volume = START_FINISH_VOLUME;
     if (custom.finish) custom.finish.volume = START_FINISH_VOLUME;
+    if (custom.alarm) {
+      custom.alarm.loop = true;
+      custom.alarm.volume = ALARM_VOLUME;
+    }
   });
 }
 
@@ -82,6 +87,25 @@ export function playFinish(): void {
   custom.finish.currentTime = 0;
   custom.finish.addEventListener("ended", () => stopMusic(), { once: true });
   void custom.finish.play().catch(() => stopMusic());
+}
+
+/** Starts looping the instant the split-warning sign appears (see main.ts's edge-triggered call,
+ * keyed off the same pendingSplitAt/transition condition render.ts uses to draw the sign). A
+ * no-op if already playing or no stampede-alarm.wav was provided — no synthesized fallback, same
+ * as music. */
+export function startAlarm(): void {
+  if (!custom.alarm || alarmPlaying) return;
+  alarmPlaying = true;
+  custom.alarm.currentTime = 0;
+  void custom.alarm.play().catch(() => {});
+}
+
+export function stopAlarm(): void {
+  if (custom.alarm) {
+    custom.alarm.pause();
+    custom.alarm.currentTime = 0;
+  }
+  alarmPlaying = false;
 }
 
 /** A soft, round "hop" — a single sine oscillator bending gently up then back down, with a soft

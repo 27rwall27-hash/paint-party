@@ -152,27 +152,6 @@ function drawBird(ctx: CanvasRenderingContext2D, x: number, y: number, size: num
 
 function drawTerrainDecorations(ctx: CanvasRenderingContext2D, terrain: Terrain, y: number, h: number, horizonY: number, now: number): void {
   if (terrain === "grass") {
-    // A single big tree on the horizon.
-    const trunkX = CANVAS_W * 0.76;
-    const trunkH = h * 0.22;
-    const trunkW = Math.max(6, h * 0.03);
-    ctx.fillStyle = "rgba(92, 63, 41, 0.55)";
-    ctx.fillRect(trunkX - trunkW / 2, horizonY - trunkH, trunkW, trunkH);
-
-    ctx.fillStyle = "rgba(55, 110, 48, 0.55)";
-    const canopyR = h * 0.16;
-    const canopyY = horizonY - trunkH - canopyR * 0.55;
-    for (const [dx, dyFrac, scale] of [
-      [0, 0, 1] as const,
-      [-canopyR * 0.8, 0.35, 0.7] as const,
-      [canopyR * 0.8, 0.35, 0.7] as const,
-      [0, -0.5, 0.75] as const,
-    ]) {
-      ctx.beginPath();
-      ctx.arc(trunkX + dx, canopyY + canopyR * dyFrac, canopyR * scale, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
     // Fuller, puffier clouds, high in the sky, drifting almost imperceptibly slowly.
     ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
     const clouds: Array<[number, number, number]> = [
@@ -329,14 +308,14 @@ function drawSplitWarningSign(ctx: CanvasRenderingContext2D, y: number, h: numbe
  * is where the ground line is actually DRAWN (groundY + radius + 4 in drawRace, not groundY itself
  * — groundY is the runners' own center point, a few px above their feet). */
 function drawHurdle(ctx: CanvasRenderingContext2D, leftX: number, groundLineY: number, size: number): void {
-  const legHeight = size * 2.2;
+  const legHeight = size * 2.6;
   const barY = groundLineY - legHeight;
-  const width = size * 1.8;
+  const width = size * 2.1;
   const rightX = leftX + width;
 
   ctx.lineCap = "round";
-  ctx.strokeStyle = "#e8e2d8";
-  ctx.lineWidth = Math.max(2, size * 0.3);
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(3, size * 0.36);
   for (const legX of [leftX, rightX]) {
     ctx.beginPath();
     ctx.moveTo(legX, groundLineY);
@@ -344,12 +323,19 @@ function drawHurdle(ctx: CanvasRenderingContext2D, leftX: number, groundLineY: n
     ctx.stroke();
   }
 
-  ctx.strokeStyle = "#d94b3a";
-  ctx.lineWidth = Math.max(3, size * 0.42);
-  ctx.beginPath();
-  ctx.moveTo(leftX, barY);
-  ctx.lineTo(rightX, barY);
-  ctx.stroke();
+  // Hazard-striped crossbar (alternating yellow/black) — much higher contrast than a flat color,
+  // matching the same hazard palette as drawSplitWarningSign.
+  const stripeCount = 5;
+  const stripeW = width / stripeCount;
+  ctx.lineCap = "butt";
+  ctx.lineWidth = Math.max(5, size * 0.55);
+  for (let i = 0; i < stripeCount; i++) {
+    ctx.strokeStyle = i % 2 === 0 ? "#ffd60a" : "#1b1620";
+    ctx.beginPath();
+    ctx.moveTo(leftX + i * stripeW, barY);
+    ctx.lineTo(leftX + (i + 1) * stripeW, barY);
+    ctx.stroke();
+  }
 }
 
 /** A stick figure with a colored head — sprinting hard in place (bent knees/elbows on a continuous
@@ -461,7 +447,7 @@ function drawStickFigure(
   if (isHuman) {
     // A red triangle marker pointing down at the head, rather than a ring around it.
     const markerSize = headRadius * 0.9;
-    const markerY = headY - headRadius - markerSize * 1.3;
+    const markerY = headY - headRadius - markerSize * 2.1;
     ctx.beginPath();
     ctx.moveTo(footX, markerY + markerSize); // bottom tip, pointing down at the head
     ctx.lineTo(footX - markerSize * 0.8, markerY);
@@ -550,7 +536,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     const spawnX = CANVAS_W - 24;
     const targetX = slotX(0);
     const obstacleX = spawnX + progress * (targetX - spawnX);
-    drawHurdle(ctx, obstacleX, groundLineY, Math.max(7, radius * 0.55));
+    drawHurdle(ctx, obstacleX, groundLineY, Math.max(9, radius * 0.75));
   }
 
   race.racers.forEach((racer, rank) => {

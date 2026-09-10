@@ -2,6 +2,7 @@ import {
   CPU_BASE_SKILL_MAX,
   CPU_BASE_SKILL_MIN,
   CPU_SKILL_JITTER,
+  FIRST_OBSTACLE_DELAY_MS,
   JUMP_AIRTIME_FIRST_MS,
   JUMP_AIRTIME_LAST_MS,
   JUMP_ARC_HEIGHT_FIRST_PX,
@@ -10,6 +11,7 @@ import {
   KNOCKOUT_OFFSCREEN_SLOT,
   MULTI_OBSTACLE_CHANCE,
   MULTI_OBSTACLE_STAGGER_MAX_MS,
+  MIN_AIRBORNE_BEFORE_CONTACT_MS,
   MULTI_OBSTACLE_STAGGER_MIN_MS,
   OBSTACLE_TIMING_JITTER,
   PHASE_BASE_COLUMN_GAP_MS,
@@ -164,7 +166,7 @@ export function createRaceInstance(order: RacerIdentity[], baseSkills: Map<numbe
       knockedOutThisWave: false,
     })),
     obstacles: [],
-    nextObstacleAt: now + 600,
+    nextObstacleAt: now + FIRST_OBSTACLE_DELAY_MS,
     pendingSecondObstacleAt: null,
     waveResolutionPending: false,
     startedAt: now,
@@ -255,7 +257,8 @@ export function updateRace(race: RaceInstance, dt: number, now: number, humanJum
       if (now < reachTimeForRank(obstacle, rank)) continue;
       obstacle.resolvedRanks[rank] = true;
       const racer = obstacle.order[rank]!;
-      if (!isAirborne(racer, now)) racer.knockedOutThisWave = true;
+      const clearedWithMargin = isAirborne(racer, now) && now - racer.jumpStartedAt >= MIN_AIRBORNE_BEFORE_CONTACT_MS;
+      if (!clearedWithMargin) racer.knockedOutThisWave = true;
     }
 
     if (now - obstacle.spawnedAt >= totalSweepMs(obstacle)) {

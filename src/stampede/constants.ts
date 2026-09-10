@@ -101,6 +101,9 @@ export const PHASE_BASE_SPAWN_MS: Record<"SINGLE" | "TWO_WAY" | "THREE_WAY", num
   THREE_WAY: 500,
 };
 export const RACE_RAMP_SPAWN_FLOOR_MS = 280;
+// Gap before a freshly-created race's very first obstacle — was a flat 600ms, +1500ms per
+// feedback that the very first hurdle of a race arrived too soon to get settled in.
+export const FIRST_OBSTACLE_DELAY_MS = 600 + 1500;
 // Each spawn gap is jittered by +/- this fraction. Without ANY randomness here, once two or more
 // races have both fully ramped to their floor pacing their obstacle cycles become perfectly fixed
 // periods with a FIXED relative phase to each other — if that phase never happens to put both
@@ -117,6 +120,13 @@ export const SPAWN_INTERVAL_JITTER = 0.48;
 // jitters each obstacle's own lead-in/column-gap independently, so the timing itself varies wave
 // to wave even at the same rank, without changing pacing on average or adding a new mechanic.
 export const OBSTACLE_TIMING_JITTER = 0.12;
+
+// A jump only clears an obstacle if the racer left the ground at least this long before contact —
+// being technically airborne (isAirborne) at the reach instant wasn't enough on its own, since
+// that let a click land right as the hurdle arrived and still count, reading as if the runner's
+// foot should have caught it. CPUs jump well ahead of this already (60% of their own airtime
+// before reach); this only meaningfully tightens human clicks that land suspiciously late.
+export const MIN_AIRBORNE_BEFORE_CONTACT_MS = 130;
 
 // A second simultaneous obstacle was tried as a rare difficulty spike and turned out to feel too
 // hard rather than "occasionally spicy" — back to a single obstacle per wave, always. Left at 0
@@ -207,7 +217,10 @@ export const MUSIC_SPEED_MAX_MULTIPLIER = 2.85;
 
 // start.wav/finish.wav reuse Paint Party's own files (see customAudio.ts) at their native volume
 // otherwise, which read as too loud next to everything else here.
-export const START_FINISH_VOLUME = 0.8; // 1.0 * 0.8, per feedback.
+export const START_FINISH_VOLUME = 0.64; // 1.0 * 0.8 * 0.8, per feedback (two successive -20% cuts).
+
+// Loops for as long as the split-warning sign is on screen (see sound.ts's startAlarm/stopAlarm).
+export const ALARM_VOLUME = 0.55;
 
 // The moment THREE_WAY's nominal duration is reached, the game doesn't cut straight to the
 // RESULTS overlay. Every racer instead sprints off the right edge in the order they finished

@@ -13,6 +13,10 @@ export interface StampedeCustomAudio {
   leap: HTMLAudioElement | null;
   start: HTMLAudioElement | null;
   finish: HTMLAudioElement | null;
+  /** Loops for as long as the split-warning sign (drawSplitWarningSign) is on screen — see
+   * sound.ts's startAlarm/stopAlarm. Like music, there's no synthesized fallback: silent until
+   * provided. */
+  alarm: HTMLAudioElement | null;
 }
 
 const PROBE_TIMEOUT_MS = 5000;
@@ -33,11 +37,12 @@ function tryLoad(path: string): Promise<HTMLAudioElement | null> {
 }
 
 export async function loadCustomAudio(): Promise<StampedeCustomAudio> {
-  const [music, leap, start, finish] = await Promise.all([
+  const [music, leap, start, finish, alarm] = await Promise.all([
     tryLoad("/audio/stampede-music.wav"),
     tryLoad("/audio/stampede-leap.wav"),
     tryLoad("/audio/start.wav"),
     tryLoad("/audio/finish.wav"),
+    tryLoad("/audio/stampede-alarm.wav"),
   ]);
-  return { music, leap, start, finish };
+  return { music, leap, start, finish, alarm };
 }
