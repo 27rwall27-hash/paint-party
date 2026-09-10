@@ -7,6 +7,8 @@ import {
   PRE_SPLIT_QUIET_MS,
   RACER_COUNT,
   RESULTS_EXIT_RUN_MS,
+  RESULTS_EXIT_STAGGER_MS,
+  RESULTS_POST_EXIT_HOLD_MS,
   SINGLE_PHASE_MS,
   SPLIT_EMPTY_HOLD_MS,
   SPLIT_PUSH_IN_MS,
@@ -41,6 +43,10 @@ export interface SplitTransition {
 
 export const SPLIT_TRANSITION_TOTAL_MS = SPLIT_PUSH_IN_MS + SPLIT_EMPTY_HOLD_MS + (RACER_COUNT - 1) * SPLIT_RUNNER_STAGGER_MS + SPLIT_RUNNER_RUN_IN_MS;
 
+/** Total time from `finishingAt` until RESULTS actually begins — every racer's own staggered exit
+ * (see finishStaggerRank) plus the hold after the very last one clears. */
+export const RESULTS_EXIT_TOTAL_MS = (RACER_COUNT - 1) * RESULTS_EXIT_STAGGER_MS + RESULTS_EXIT_RUN_MS + RESULTS_POST_EXIT_HOLD_MS;
+
 export interface StampedeSession {
   phase: StampedePhase;
   phaseEnteredAt: number;
@@ -65,9 +71,15 @@ export interface StampedeSession {
    * period above has elapsed. */
   transition: SplitTransition | null;
   /** Set the instant THREE_WAY's nominal duration is reached — from that moment every racer
-   * sprints off the right edge (see render.ts) instead of the game cutting straight to RESULTS.
-   * Null until then; RESULTS actually begins RESULTS_EXIT_RUN_MS after this is set. */
+   * sprints off the right edge, staggered by overall finish order (see finishStaggerRank and
+   * render.ts's exitProgressFor), instead of the game cutting straight to RESULTS. Null until
+   * then; RESULTS actually begins RESULTS_EXIT_TOTAL_MS after this is set. */
   finishingAt: number | null;
+  /** identityId -> position in the OVERALL final standings (0 = the eventual winner, exits first;
+   * RACER_COUNT-1 = last place, exits last) — computed once, the same instant `finishingAt` is
+   * set (using the same score math as `finalScores`, just published a beat earlier since nothing
+   * reads it before RESULTS actually begins anyway). Null until then. */
+  finishStaggerRank: Map<number, number> | null;
 }
 
 /** Fisher-Yates, returns a new array. */
@@ -101,6 +113,7 @@ export function createStampedeSession(identities: RacerIdentity[], now: number):
     clearSinceAt: null,
     transition: null,
     finishingAt: null,
+    finishStaggerRank: null,
   };
 }
 
@@ -222,15 +235,23 @@ export function updateStampedeSession(session: StampedeSession, dt: number, now:
     });
   } else if (session.phase === "THREE_WAY") {
     if (session.finishingAt === null) {
-      if (elapsed >= THREE_WAY_PHASE_MS) session.finishingAt = now;
-    } else if (now - session.finishingAt >= RESULTS_EXIT_RUN_MS) {
-      const scores = session.identities.map(() => 0);
-      for (const race of session.races) {
-        race.racers.forEach((r, rank) => {
-          scores[r.identityId] = (scores[r.identityId] ?? 0) + (POINTS_BY_RANK[rank] ?? 0);
-        });
+      if (elapsed >= THREE_WAY_PHASE_MS) {
+        session.finishingAt = now;
+        // Scores (and the overall standings they imply) are computed NOW rather than at the end
+        // of the exit sequence — the stagger order below needs them immediately, and nothing
+        // reads finalScores before RESULTS actually begins anyway, so publishing it a beat early
+        // is harmless.
+        const scores = session.identities.map(() => 0);
+        for (const race of session.races) {
+          race.racers.forEach((r, rank) => {
+            scores[r.identityId] = (scores[r.identityId] ?? 0) + (POINTS_BY_RANK[rank] ?? 0);
+          });
+        }
+        session.finalScores = scores;
+        const overallOrder = session.identities.map((i) => i.id).sort((a, b) => (scores[b] ?? 0) - (scores[a] ?? 0));
+        session.finishStaggerRank = new Map(overallOrder.map((identityId, i) => [identityId, i]));
       }
-      session.finalScores = scores;
+    } else if (now - session.finishingAt >= RESULTS_EXIT_TOTAL_MS) {
       session.phase = "RESULTS";
       session.phaseEnteredAt = now;
     }

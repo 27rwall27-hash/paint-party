@@ -184,18 +184,29 @@ export const CPU_SKILL_JITTER = 0.08;
 export const LEAP_VOLUME_HUMAN = 0.99;
 export const LEAP_VOLUME_CPU = 0.096;
 
-// Background music — loops for the whole game, ramping 10% faster every 10 seconds (compounding),
-// capped so it never runs away into an unlistenable chipmunk-speed screech by the end of a long
-// session (1.1^11 ≈ 2.85x, roughly the cap below).
-export const MUSIC_VOLUME = 0.5;
-export const MUSIC_SPEED_STEP_PCT = 0.1;
-export const MUSIC_SPEED_INTERVAL_MS = 10_000;
+// Background music — loops for the whole game, ramping 0.5% faster every second (compounding),
+// capped so it never runs away into an unlistenable chipmunk-speed screech during an unusually
+// long session (1.005^600 ≈ 19.9x is where it'd be without a cap after 10 minutes — the cap below
+// is comfortably reached well before that, but not during a normal-length game).
+export const MUSIC_VOLUME = 0.6; // 0.5 * 1.2, per feedback that the first pass was too quiet.
+export const MUSIC_SPEED_STEP_PCT = 0.005;
+export const MUSIC_SPEED_INTERVAL_MS = 1_000;
 export const MUSIC_SPEED_MAX_MULTIPLIER = 2.85;
 
+// start.wav/finish.wav reuse Paint Party's own files (see customAudio.ts) at their native volume
+// otherwise, which read as too loud next to everything else here.
+export const START_FINISH_VOLUME = 0.8; // 1.0 * 0.8, per feedback.
+
 // The moment THREE_WAY's nominal duration is reached, the game doesn't cut straight to the
-// RESULTS overlay — every racer sprints off the right edge first (see StampedeSession.finishingAt/
-// render.ts), then RESULTS actually begins once they're clear.
-export const RESULTS_EXIT_RUN_MS = 850;
+// RESULTS overlay. Every racer instead sprints off the right edge in the order they finished
+// OVERALL (best first, like leading a victory lap off) rather than all at once — each racer's own
+// STAGGER slot starts RESULTS_EXIT_STAGGER_MS after the previous one, and takes RUN_MS to clear
+// the screen once it starts. RESULTS itself then waits an extra POST_EXIT_HOLD_MS after the LAST
+// (worst-placed) racer has cleared before appearing. See StampedeSession.finishingAt/
+// finishStaggerRank and render.ts's exitProgressFor.
+export const RESULTS_EXIT_STAGGER_MS = 120;
+export const RESULTS_EXIT_RUN_MS = 550;
+export const RESULTS_POST_EXIT_HOLD_MS = 2_000;
 
 // The split "push in" cinematic (see StampedeSession.SplitTransition/render.ts's
 // drawSplitTransition): the current layout gradually reflows into the new, smaller-band layout

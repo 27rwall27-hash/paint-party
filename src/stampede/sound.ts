@@ -5,10 +5,11 @@
 // Stampede-specific copies (per direct request) — silent if those happen to be missing too.
 //
 // Music loops for the whole game and ramps MUSIC_SPEED_STEP_PCT faster every
-// MUSIC_SPEED_INTERVAL_MS (compounding), capped at MUSIC_SPEED_MAX_MULTIPLIER — and stops the
-// instant the finish cue finishes playing (see playFinish).
+// MUSIC_SPEED_INTERVAL_MS (compounding — 0.5%/second by default), capped at
+// MUSIC_SPEED_MAX_MULTIPLIER — and stops the instant the finish cue finishes playing (see
+// playFinish).
 
-import { LEAP_VOLUME_CPU, LEAP_VOLUME_HUMAN, MUSIC_SPEED_INTERVAL_MS, MUSIC_SPEED_MAX_MULTIPLIER, MUSIC_SPEED_STEP_PCT, MUSIC_VOLUME } from "./constants.ts";
+import { LEAP_VOLUME_CPU, LEAP_VOLUME_HUMAN, MUSIC_SPEED_INTERVAL_MS, MUSIC_SPEED_MAX_MULTIPLIER, MUSIC_SPEED_STEP_PCT, MUSIC_VOLUME, START_FINISH_VOLUME } from "./constants.ts";
 import { loadCustomAudio, type StampedeCustomAudio } from "./customAudio.ts";
 
 let custom: StampedeCustomAudio = { music: null, leap: null, start: null, finish: null };
@@ -22,6 +23,8 @@ export function init(): void {
       custom.music.loop = true;
       custom.music.volume = MUSIC_VOLUME;
     }
+    if (custom.start) custom.start.volume = START_FINISH_VOLUME;
+    if (custom.finish) custom.finish.volume = START_FINISH_VOLUME;
   });
 }
 
@@ -81,32 +84,28 @@ export function playFinish(): void {
   void custom.finish.play().catch(() => stopMusic());
 }
 
-/** A quick downward "hop" chirp (triangle sweep + a short square click layered on top) — the
- * fallback used when no stampede-leap.wav is provided. */
+/** A soft, round "hop" — a single sine oscillator bending gently up then back down, with a soft
+ * (not instant) attack — the fallback used when no stampede-leap.wav is provided. Third design
+ * this went through: the first was a plain upward sine sweep, the second added a downward triangle
+ * chirp plus a square-wave click layered on top that read as too harsh/electronic; this drops the
+ * extra click entirely and keeps a single mellow tone. */
 function synthLeapBlip(volume: number): void {
   if (!audioCtx) audioCtx = new AudioContext();
   const ctx = audioCtx;
+  const t0 = ctx.currentTime;
 
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
-  osc.type = "triangle";
-  osc.frequency.setValueAtTime(780, ctx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(340, ctx.currentTime + 0.1);
-  gain.gain.setValueAtTime(volume, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.13);
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(500, t0);
+  osc.frequency.exponentialRampToValueAtTime(760, t0 + 0.06);
+  osc.frequency.exponentialRampToValueAtTime(480, t0 + 0.18);
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(volume, t0 + 0.02); // soft attack, not an instant click-in
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
   osc.connect(gain).connect(ctx.destination);
-  osc.start();
-  osc.stop(ctx.currentTime + 0.14);
-
-  const click = ctx.createOscillator();
-  const clickGain = ctx.createGain();
-  click.type = "square";
-  click.frequency.setValueAtTime(1400, ctx.currentTime);
-  clickGain.gain.setValueAtTime(volume * 0.25, ctx.currentTime);
-  clickGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
-  click.connect(clickGain).connect(ctx.destination);
-  click.start();
-  click.stop(ctx.currentTime + 0.05);
+  osc.start(t0);
+  osc.stop(t0 + 0.23);
 }
 
 /** Plays the instant a racer actually leaves the ground — see main.ts's airborne-transition

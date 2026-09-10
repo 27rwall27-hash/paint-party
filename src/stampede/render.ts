@@ -8,6 +8,7 @@ import {
   POINTS_BY_RANK,
   RACER_COUNT,
   RESULTS_EXIT_RUN_MS,
+  RESULTS_EXIT_STAGGER_MS,
   SINGLE_PHASE_MS,
   SPLIT_EMPTY_HOLD_MS,
   SPLIT_PUSH_IN_MS,
@@ -119,6 +120,18 @@ function computeSunState(t: number): SunState {
  * bases sit properly on top of the sand rather than being covered by it. */
 function drawTerrainDecorations(ctx: CanvasRenderingContext2D, terrain: Terrain, y: number, h: number, horizonY: number, now: number): void {
   if (terrain === "grass") {
+    // A couple of soft, static hills on the horizon (same treatment as the pyramids below).
+    ctx.fillStyle = "rgba(70, 130, 60, 0.45)";
+    for (const xFrac of [0.7, 0.85]) {
+      const baseX = CANVAS_W * xFrac;
+      const hillW = h * 0.26;
+      const hillH = h * 0.13;
+      ctx.beginPath();
+      ctx.ellipse(baseX, horizonY, hillW, hillH, 0, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+    }
+
     // A few soft clouds, high in the sky, drifting almost imperceptibly slowly.
     ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
     const clouds: Array<[number, number, number]> = [
@@ -151,6 +164,21 @@ function drawTerrainDecorations(ctx: CanvasRenderingContext2D, terrain: Terrain,
       ctx.fill();
     }
   } else {
+    // A jagged glacier silhouette on the horizon (same treatment as the pyramids/hills).
+    ctx.fillStyle = "rgba(200, 225, 235, 0.6)";
+    const baseX = CANVAS_W * 0.72;
+    const glacierH = h * 0.19;
+    const glacierW = glacierH * 1.7;
+    ctx.beginPath();
+    ctx.moveTo(baseX - glacierW, horizonY);
+    ctx.lineTo(baseX - glacierW * 0.5, horizonY - glacierH * 0.6);
+    ctx.lineTo(baseX - glacierW * 0.15, horizonY - glacierH);
+    ctx.lineTo(baseX + glacierW * 0.25, horizonY - glacierH * 0.75);
+    ctx.lineTo(baseX + glacierW * 0.6, horizonY - glacierH * 0.4);
+    ctx.lineTo(baseX + glacierW, horizonY);
+    ctx.closePath();
+    ctx.fill();
+
     // A sparse scatter of slowly falling snowflakes, confined to the sky so they never cross into
     // the ground/obstacle row. Deterministic per-index placement (not Math.random()) so flakes
     // drift smoothly instead of jittering to a new spot every frame.
@@ -403,10 +431,11 @@ function drawRacerLabel(ctx: CanvasRenderingContext2D, runnerX: number, y: numbe
 /** `animNow` drives ONLY the sprinting-in-place run cycle (see drawStickFigure) — it's a separate,
  * speed-ramped clock from `now` (see main.ts's animClockMs) so the visible running animation
  * speeds up in lockstep with the music, without touching actual jump timing/difficulty, which
- * stays on the real game clock. `exitT` (0..1) is nonzero only once the game has ended and every
- * racer is sprinting off the right edge (see StampedeSession.finishingAt) — at that point jump
- * state is ignored entirely, racers just run straight off screen. */
-function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number, animNow: number, sun: SunState, terrain: Terrain, exitT: number): void {
+ * stays on the real game clock. `getExitT(identityId)` (0..1) is nonzero only once the game has
+ * ended and THIS racer's own staggered exit has started (see StampedeSession.finishingAt/
+ * finishStaggerRank and exitProgressFor) — at that point jump state is ignored entirely, the racer
+ * just runs straight off the right edge. */
+function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number, animNow: number, sun: SunState, terrain: Terrain, getExitT: (identityId: number) => number): void {
   const { groundLineY, headRadius, radius, slotX } = drawBandScene(ctx, y, h, sun, terrain, now);
 
   // The race's obstacle(s) — normally one, rarely two (see MULTI_OBSTACLE_CHANCE) — each slides
@@ -435,6 +464,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
     let airborne = false;
     let jumpT = 0;
     let jumpOffset = 0;
+    const exitT = getExitT(racer.identityId);
     if (exitT > 0) {
       runnerX = lerp(runnerX, CANVAS_W + 150, exitT);
     } else {
@@ -452,70 +482,60 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   });
 }
 
+const NO_EXIT = () => 0;
+
 /** The push-in/empty-scene/runners-file-in cinematic that now plays at every split instead of the
  * layout just snapping straight to the new, smaller bands (see StampedeSession.SplitTransition).
- * Three phases back to back, all timed from `transition.startedAt`:
- *   1. PUSH_IN — existing bands reflow from the old layout to the new one; the brand-new band (if
- *      any) slides up into place from below. No racers drawn at all.
- *   2. EMPTY_HOLD — final layout, fully settled, still no racers — a beat of "empty track" before
+ * Bands that already existed before the split keep rendering their real, live racers the WHOLE
+ * time (via the normal drawRace, just fed animating y/h during the push-in) — they never disappear
+ * and reappear. Only the brand-new band (which has no RaceInstance yet) goes through its own
+ * three-beat sequence, timed from `transition.startedAt`:
+ *   1. PUSH_IN — slides up into place from below the visible area, empty.
+ *   2. EMPTY_HOLD — settled at its final position, still empty — a beat of "empty track" before
  *      anyone appears.
  *   3. Run-in — every rank's racer sprints in from off-screen left into its slot, one rank at a
- *      time across ALL bands simultaneously (so e.g. every band's current 1st place dashes in
- *      together, then every 2nd place, and so on). */
+ *      time (using the snapshot captured at transition start — see
+ *      StampedeSession.SplitTransition.newBandOrder). */
 function drawSplitTransition(ctx: CanvasRenderingContext2D, session: StampedeSession, identitiesById: Map<number, RacerIdentity>, sun: SunState, now: number, animNow: number): void {
   const transition = session.transition!;
   const t = now - transition.startedAt;
   const bandCount = transition.toBandCount;
+  const pushT = Math.min(1, t / SPLIT_PUSH_IN_MS);
+
+  // Existing bands: real race, real racers, drawn the whole time — only their RECT animates.
+  for (let i = 0; i < transition.fromBandCount; i++) {
+    const from = bandRect(i, transition.fromBandCount);
+    const to = bandRect(i, bandCount);
+    const y = lerp(from.y, to.y, pushT);
+    const h = lerp(from.h, to.h, pushT);
+    const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
+    drawRace(ctx, session.races[i]!, identitiesById, y, h, now, animNow, sun, terrain, NO_EXIT);
+  }
+
+  // The brand-new band, if this split adds one (it always does in this game's flow, but stay safe).
+  if (bandCount <= transition.fromBandCount) return;
+  const newIdx = transition.fromBandCount;
+  const newRect = bandRect(newIdx, bandCount);
+  const terrain = TERRAIN_BY_RACE_INDEX[newIdx] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
 
   if (t < SPLIT_PUSH_IN_MS) {
-    const pushT = t / SPLIT_PUSH_IN_MS;
-    for (let i = 0; i < bandCount; i++) {
-      const to = bandRect(i, bandCount);
-      let y: number;
-      let h: number;
-      if (i < transition.fromBandCount) {
-        const from = bandRect(i, transition.fromBandCount);
-        y = lerp(from.y, to.y, pushT);
-        h = lerp(from.h, to.h, pushT);
-      } else {
-        // The brand-new band slides up into place from just below the visible area.
-        y = lerp(CANVAS_H, to.y, pushT);
-        h = to.h;
-      }
-      const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
-      drawBandScene(ctx, y, h, sun, terrain, now);
-    }
+    const y = lerp(CANVAS_H, newRect.y, pushT);
+    drawBandScene(ctx, y, newRect.h, sun, terrain, now);
     return;
   }
 
-  const bands = Array.from({ length: bandCount }, (_, i) => bandRect(i, bandCount));
-
-  if (t < SPLIT_PUSH_IN_MS + SPLIT_EMPTY_HOLD_MS) {
-    bands.forEach((rect, i) => {
-      const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
-      drawBandScene(ctx, rect.y, rect.h, sun, terrain, now);
-    });
-    return;
-  }
+  const geom = drawBandScene(ctx, newRect.y, newRect.h, sun, terrain, now);
+  if (t < SPLIT_PUSH_IN_MS + SPLIT_EMPTY_HOLD_MS) return; // empty hold, no runners yet
 
   const runInT = t - SPLIT_PUSH_IN_MS - SPLIT_EMPTY_HOLD_MS;
-  bands.forEach((rect, i) => {
-    const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
-    const geom = drawBandScene(ctx, rect.y, rect.h, sun, terrain, now);
-    // Bands that already existed keep rendering straight from their real, live race; only the
-    // brand-new band (which has no RaceInstance yet) uses the snapshot captured at transition
-    // start (see StampedeSession.SplitTransition.newBandOrder).
-    const order: RacerIdentity[] = i < transition.fromBandCount ? session.races[i]!.racers.map((r) => identitiesById.get(r.identityId)!) : transition.newBandOrder;
-
-    order.forEach((identity, rank) => {
-      const startAt = rank * SPLIT_RUNNER_STAGGER_MS;
-      if (runInT < startAt) return;
-      const localT = Math.min(1, (runInT - startAt) / SPLIT_RUNNER_RUN_IN_MS);
-      const targetX = geom.slotX(RACER_COUNT - 1 - rank);
-      const runnerX = lerp(-80, targetX, localT);
-      drawStickFigure(ctx, runnerX, geom.groundLineY, geom.headRadius, identity.color, animNow, identity.id * 1.9, false, 0, identity.id === 0);
-      drawRacerLabel(ctx, runnerX, rect.y, geom.groundLineY, rank, identity.name);
-    });
+  transition.newBandOrder.forEach((identity, rank) => {
+    const startAt = rank * SPLIT_RUNNER_STAGGER_MS;
+    if (runInT < startAt) return;
+    const localT = Math.min(1, (runInT - startAt) / SPLIT_RUNNER_RUN_IN_MS);
+    const targetX = geom.slotX(RACER_COUNT - 1 - rank);
+    const runnerX = lerp(-80, targetX, localT);
+    drawStickFigure(ctx, runnerX, geom.groundLineY, geom.headRadius, identity.color, animNow, identity.id * 1.9, false, 0, identity.id === 0);
+    drawRacerLabel(ctx, runnerX, newRect.y, geom.groundLineY, rank, identity.name);
   });
 }
 
@@ -612,6 +632,18 @@ function drawResults(ctx: CanvasRenderingContext2D, session: StampedeSession): v
  * sprinting-in-place run cycle, so the visible running animation speeds up in lockstep with the
  * music without touching actual jump timing. Defaults to `now` so callers that don't care about
  * music speed (e.g. tests) still get a normal-speed animation. */
+/** 0 until THIS racer's own staggered exit slot (by overall finish order — see
+ * StampedeSession.finishStaggerRank) has started, then ramps 0->1 over its own RESULTS_EXIT_RUN_MS
+ * once it does. Racers exit one at a time (best overall placement first, like leading a victory
+ * lap off) rather than everyone bunching up and leaving together. */
+function exitProgressFor(session: StampedeSession, identityId: number, now: number): number {
+  if (session.finishingAt === null || !session.finishStaggerRank) return 0;
+  const staggerRank = session.finishStaggerRank.get(identityId) ?? 0;
+  const startAt = session.finishingAt + staggerRank * RESULTS_EXIT_STAGGER_MS;
+  if (now < startAt) return 0;
+  return Math.min(1, (now - startAt) / RESULTS_EXIT_RUN_MS);
+}
+
 export function render(ctx: CanvasRenderingContext2D, session: StampedeSession, now: number, animNow: number = now): void {
   ctx.fillStyle = "#1b1620";
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
@@ -622,11 +654,11 @@ export function render(ctx: CanvasRenderingContext2D, session: StampedeSession, 
   if (session.transition) {
     drawSplitTransition(ctx, session, identitiesById, sun, now, animNow);
   } else {
-    const exitT = session.finishingAt !== null ? Math.min(1, (now - session.finishingAt) / RESULTS_EXIT_RUN_MS) : 0;
+    const getExitT = (identityId: number) => exitProgressFor(session, identityId, now);
     session.races.forEach((race, i) => {
       const { y, h } = bandRect(i, session.races.length);
       const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
-      drawRace(ctx, race, identitiesById, y, h, now, animNow, sun, terrain, exitT);
+      drawRace(ctx, race, identitiesById, y, h, now, animNow, sun, terrain, getExitT);
     });
   }
 
