@@ -33,8 +33,8 @@ export const FAKE_DOOR_FRACTION = 1;
 export const PLAYER_RADIUS = 0.16;
 // Free (not grid-locked) movement speed, in room-units per second — held WASD keys combine into a
 // real direction vector (diagonals included), resolved against walls/closed doors per axis.
-export const PLAYER_SPEED = 2.4;
-export const CPU_MOVE_SPEED = 2.1;
+export const PLAYER_SPEED = 1.5;
+export const CPU_MOVE_SPEED = 1.3;
 // How far outside the grid each player's own starting "vestibule" extends, and how tightly their
 // lateral position is held near their own entrance while out there.
 export const VESTIBULE_DEPTH = 0.85;
@@ -45,12 +45,16 @@ export const VESTIBULE_LATERAL_CLAMP = 0.6;
 export const DOOR_INTERACT_DISTANCE = 0.42;
 
 // --- Door swing animation ----------------------------------------------------------------------
-// Closed doors are a small SECTION of the wall (not the whole thing) — hinged at the corner they
-// share with the room's other wall, with the rest of that wall drawn as a plain, permanently solid
-// stub alongside it. Visually identical whether real or fake. Opening swings the door panel a
-// full 90°, from flush along its own wall to flush along the room's OTHER wall at that same corner
-// — fully out of the passage and parallel to a wall at both ends of the swing.
-export const DOOR_LENGTH_FRACTION = 0.42;
+// Each door is a small SECTION centered in the middle of its wall (not the whole wall), flanked on
+// both sides by a plain, permanently solid stub of ordinary wall — and rendered in DOOR_COLOR, a
+// distinct color from the wall itself, so a door is visually obvious at a glance even before it's
+// tried (real vs. fake still looks identical — only "is this a door at all" is now visible, not
+// "will it open"). Opening swings the door panel a full 90°, from flush along its own wall to
+// flush along the room's OTHER wall (hinged at the near end of the door's own short span) — fully
+// out of the passage and parallel to a wall at both ends of the swing.
+export const DOOR_LENGTH_FRACTION = 0.4;
+export const WALL_COLOR = "#4a4256";
+export const DOOR_COLOR = "#b08968";
 export const DOOR_SWING_OPEN_MS = 320;
 export const DOOR_SWING_SHUT_MS = 900;
 // How long the small red "X" stays on screen after a failed (fake-door) open attempt.

@@ -1,6 +1,7 @@
 import {
   CANVAS_H,
   CANVAS_W,
+  DOOR_COLOR,
   DOOR_LENGTH_FRACTION,
   DOOR_SWING_OPEN_MS,
   DOOR_SWING_SHUT_MS,
@@ -13,6 +14,7 @@ import {
   PLAYER_RADIUS,
   TOTAL_ROOMS,
   VESTIBULE_DEPTH,
+  WALL_COLOR,
   WALL_WIDTH,
 } from "./constants.ts";
 import { directionFromTo, entranceRoomForSide, ENTRANCE_SIDE_BY_PLAYER, QUADRANT_BY_PLAYER, type DoorEdge, type Position, type RoomId } from "./grid.ts";
@@ -76,24 +78,29 @@ function line(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number,
 
 /** Every interior edge's roomA is always the room immediately N or W of roomB (see
  * interiorEdgeKey's string-ordering, which — since every row/col is a single digit 0-4 — sorts
- * exactly the same as comparing (row,col) tuples). The door itself is a small SECTION of the
- * wall (see DOOR_LENGTH_FRACTION), hinged at the corner it shares with roomA's OTHER
- * (perpendicular) wall — closed, it extends along its own wall (flush, blocking that section,
- * indistinguishable from the plain solid stub covering the rest of the wall); fully open, it's
- * rotated 90° to extend along that perpendicular wall instead — flush against it, fully out of
- * the passage, parallel to a wall at both ends of the swing. The remaining, non-door stretch of
- * the wall (from the far end of the door to `wallEnd`) is always solid. */
-function computeEdgeGeom(layout: Layout, edge: DoorEdge): { hinge: { x: number; y: number }; wallDir: { x: number; y: number }; perpDir: { x: number; y: number }; panelLen: number; wallEnd: { x: number; y: number } } {
+ * exactly the same as comparing (row,col) tuples). The door is a small section CENTERED in the
+ * middle of the wall (see DOOR_LENGTH_FRACTION), flanked by a plain solid stub of ordinary wall on
+ * each side — closed, it lies flush along its own wall, filling that middle gap (indistinguishable
+ * from the stubs apart from its distinct color — see DOOR_COLOR); fully open, it's hinged at its
+ * own near end and rotated 90° OUTWARD (away from roomA, toward roomB) to lie flush alongside the
+ * wall it swept through — fully out of the passage, parallel to a wall at both ends of the swing. */
+function computeEdgeGeom(
+  layout: Layout,
+  edge: DoorEdge,
+): { doorStart: { x: number; y: number }; doorEnd: { x: number; y: number }; wallStart: { x: number; y: number }; wallEnd: { x: number; y: number }; wallDir: { x: number; y: number }; perpDir: { x: number; y: number }; doorLen: number } {
   const dir = directionFromTo(edge.roomA, edge.roomB);
   const isVertical = dir === "E";
   const a = roomCenter(layout, edge.roomA);
   const half = layout.cellSize / 2;
-  const hinge = isVertical ? { x: a.x + half, y: a.y - half } : { x: a.x - half, y: a.y + half };
+  const wallStart = isVertical ? { x: a.x + half, y: a.y - half } : { x: a.x - half, y: a.y + half };
   const wallDir = isVertical ? { x: 0, y: 1 } : { x: 1, y: 0 };
-  const perpDir = isVertical ? { x: -1, y: 0 } : { x: 0, y: -1 }; // into roomA
-  const panelLen = layout.cellSize * DOOR_LENGTH_FRACTION;
-  const wallEnd = { x: hinge.x + wallDir.x * layout.cellSize, y: hinge.y + wallDir.y * layout.cellSize };
-  return { hinge, wallDir, perpDir, panelLen, wallEnd };
+  const perpDir = isVertical ? { x: 1, y: 0 } : { x: 0, y: 1 }; // OUT of roomA, toward roomB
+  const wallEnd = { x: wallStart.x + wallDir.x * layout.cellSize, y: wallStart.y + wallDir.y * layout.cellSize };
+  const doorLen = layout.cellSize * DOOR_LENGTH_FRACTION;
+  const doorOffset = (layout.cellSize - doorLen) / 2;
+  const doorStart = { x: wallStart.x + wallDir.x * doorOffset, y: wallStart.y + wallDir.y * doorOffset };
+  const doorEnd = { x: doorStart.x + wallDir.x * doorLen, y: doorStart.y + wallDir.y * doorLen };
+  return { doorStart, doorEnd, wallStart, wallEnd, wallDir, perpDir, doorLen };
 }
 
 function doorSwingT(session: LightMazeSession, edge: DoorEdge, now: number): number {
@@ -107,22 +114,25 @@ function doorSwingT(session: LightMazeSession, edge: DoorEdge, now: number): num
 
 function drawWallsAndDoors(ctx: CanvasRenderingContext2D, session: LightMazeSession, layout: Layout, now: number): void {
   ctx.lineCap = "round";
-  ctx.strokeStyle = "#4a4256";
-  ctx.lineWidth = WALL_WIDTH;
   for (const edge of session.grid.edges.values()) {
     const geom = computeEdgeGeom(layout, edge);
 
-    // The rest of the wall past the door's own section — always solid, never animates.
-    const stubStart = { x: geom.hinge.x + geom.wallDir.x * geom.panelLen, y: geom.hinge.y + geom.wallDir.y * geom.panelLen };
-    line(ctx, stubStart.x, stubStart.y, geom.wallEnd.x, geom.wallEnd.y);
+    // The two plain wall stubs flanking the door — always solid, never animate.
+    ctx.strokeStyle = WALL_COLOR;
+    ctx.lineWidth = WALL_WIDTH;
+    line(ctx, geom.wallStart.x, geom.wallStart.y, geom.doorStart.x, geom.doorStart.y);
+    line(ctx, geom.doorEnd.x, geom.doorEnd.y, geom.wallEnd.x, geom.wallEnd.y);
 
+    // The door itself, hinged at its own near end, distinctly colored.
     const swingT = doorSwingT(session, edge, now);
     const angle = swingT * (Math.PI / 2);
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
     const dirX = geom.wallDir.x * cos + geom.perpDir.x * sin;
     const dirY = geom.wallDir.y * cos + geom.perpDir.y * sin;
-    line(ctx, geom.hinge.x, geom.hinge.y, geom.hinge.x + dirX * geom.panelLen, geom.hinge.y + dirY * geom.panelLen);
+    ctx.strokeStyle = DOOR_COLOR;
+    ctx.lineWidth = WALL_WIDTH + 1;
+    line(ctx, geom.doorStart.x, geom.doorStart.y, geom.doorStart.x + dirX * geom.doorLen, geom.doorStart.y + dirY * geom.doorLen);
   }
 }
 
