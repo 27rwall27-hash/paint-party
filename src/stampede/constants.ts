@@ -108,7 +108,15 @@ export const RACE_RAMP_SPAWN_FLOOR_MS = 280;
 // surfaced in testing: a session sat in TWO_WAY for 10+ simulated minutes waiting for a split that
 // was never coming). This jitter keeps the relative phase between races perpetually drifting
 // instead of frozen, so an overlapping "both clear" moment is guaranteed eventually.
-export const SPAWN_INTERVAL_JITTER = 0.35;
+export const SPAWN_INTERVAL_JITTER = 0.48;
+
+// Once a race is fully ramped, leadInMs/columnGapMs (see spawnObstacle) were otherwise a pure
+// function of ramp progress — meaning every single wave at that point had the EXACT same
+// reach-time-after-spawn, every time. That's learnable in a way that reads as a repeating click
+// pattern rather than genuine reaction ("clicking top, bottom, then middle" on autopilot) — this
+// jitters each obstacle's own lead-in/column-gap independently, so the timing itself varies wave
+// to wave even at the same rank, without changing pacing on average or adding a new mechanic.
+export const OBSTACLE_TIMING_JITTER = 0.12;
 
 // A second simultaneous obstacle was tried as a rare difficulty spike and turned out to feel too
 // hard rather than "occasionally spicy" — back to a single obstacle per wave, always. Left at 0

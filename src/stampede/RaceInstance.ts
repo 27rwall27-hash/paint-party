@@ -11,6 +11,7 @@ import {
   MULTI_OBSTACLE_CHANCE,
   MULTI_OBSTACLE_STAGGER_MAX_MS,
   MULTI_OBSTACLE_STAGGER_MIN_MS,
+  OBSTACLE_TIMING_JITTER,
   PHASE_BASE_COLUMN_GAP_MS,
   PHASE_BASE_LEAD_IN_MS,
   PHASE_BASE_SPAWN_MS,
@@ -177,9 +178,14 @@ export function rollBaseSkill(): number {
   return CPU_BASE_SKILL_MIN + Math.random() * (CPU_BASE_SKILL_MAX - CPU_BASE_SKILL_MIN);
 }
 
+/** +/- OBSTACLE_TIMING_JITTER, independently rolled per call — see its own comment for why. */
+function timingJitter(value: number): number {
+  return value * (1 + (Math.random() * 2 - 1) * OBSTACLE_TIMING_JITTER);
+}
+
 function spawnObstacle(race: RaceInstance, now: number): RaceObstacle {
-  const leadInMs = rampedValue(PHASE_BASE_LEAD_IN_MS[race.phase], RACE_RAMP_LEAD_IN_FLOOR_MS, race, now);
-  const columnGapMs = rampedValue(PHASE_BASE_COLUMN_GAP_MS[race.phase], RACE_RAMP_COLUMN_GAP_FLOOR_MS, race, now);
+  const leadInMs = timingJitter(rampedValue(PHASE_BASE_LEAD_IN_MS[race.phase], RACE_RAMP_LEAD_IN_FLOOR_MS, race, now));
+  const columnGapMs = timingJitter(rampedValue(PHASE_BASE_COLUMN_GAP_MS[race.phase], RACE_RAMP_COLUMN_GAP_FLOOR_MS, race, now));
   const obstacle: RaceObstacle = {
     spawnedAt: now,
     leadInMs,
