@@ -62,7 +62,7 @@ export type CpuAction = { type: "wait" } | { type: "move"; dir: Side; target: Ro
  *   3. Else (nothing left to do here) -> backtrack one step along the known-open path home.
  *   4. Else (backtrack stack fully unwound) -> exit.
  *
- * This terminates for any maze shape: rule 1 only ever grows `visited` (bounded by 25 rooms),
+ * This terminates for any maze shape: rule 1 only ever grows `visited` (bounded by TOTAL_ROOMS),
  * rule 2 only ever permanently resolves one closed edge at the current room (bounded by <=4 per
  * room, monotonic, never re-attempted), and rule 3 only ever shrinks `stack` (bounded below by 1)
  * — none of these can regress, so eventually every reachable room is visited, every closed door

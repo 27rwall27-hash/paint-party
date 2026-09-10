@@ -36,7 +36,7 @@ function lerpColor(hexA: string, hexB: string, t: number): string {
   return `rgb(${Math.round(lerp(a.r, b.r, t))}, ${Math.round(lerp(a.g, b.g, t))}, ${Math.round(lerp(a.b, b.b, t))})`;
 }
 
-// Total room-units spanned by the drawable area — the 5x5 grid itself, plus a vestibule margin
+// Total room-units spanned by the drawable area — the grid itself, plus a vestibule margin
 // reserved on ALL FOUR sides (since all 4 entrances/vestibules are in view simultaneously).
 const WORLD_SIZE = GRID_SIZE + 2 * VESTIBULE_DEPTH;
 

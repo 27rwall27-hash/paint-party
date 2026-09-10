@@ -1,4 +1,4 @@
-// Light Maze's core session: a 5x5 grid of rooms (see grid.ts/mazeGen.ts), 4 players (1 human +
+// Light Maze's core session: a GRID_SIZE x GRID_SIZE grid of rooms (see grid.ts/mazeGen.ts), 4 players (1 human +
 // 3 CPU, see cpuBrain.ts) each permanently assigned one entrance side and one room-quadrant.
 // Movement is free/continuous (room-units, not grid-locked steps) — see clampAxis. Real time, no
 // turns. Every player starts OUTSIDE the maze, in a small vestibule by their own entrance, and
@@ -11,6 +11,7 @@ import {
   DOOR_SWING_SHUT_MS,
   ENDING_HOLD_MS,
   FAILED_MARKER_MS,
+  GRID_SIZE,
   PLAYER_RADIUS,
   PLAYER_SPEED,
   TOTAL_ROOMS,
@@ -126,9 +127,9 @@ function doExit(session: LightMazeSession, player: PlayerState, now: number): vo
 export function createLightMazeSession(identities: PlayerIdentity[], now: number): LightMazeSession {
   const grid = generateMaze();
   const rooms: RoomState[][] = [];
-  for (let row = 0; row < 5; row++) {
+  for (let row = 0; row < GRID_SIZE; row++) {
     const rowRooms: RoomState[] = [];
-    for (let col = 0; col < 5; col++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
       rowRooms.push({ room: { row, col }, visitedByPlayer: [false, false, false, false] });
     }
     rooms.push(rowRooms);

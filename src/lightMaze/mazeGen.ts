@@ -35,8 +35,8 @@ function buildAllInteriorEdges(): EdgeSeed[] {
   return seeds;
 }
 
-/** Randomized recursive backtracker over the 5x5 room grid — produces a spanning tree (24 of the
- * 40 total interior edges) that structurally guarantees every room is reachable from any other
+/** Randomized recursive backtracker over the room grid — produces a spanning tree (GRID_SIZE^2 - 1
+ * of the total interior edges) that structurally guarantees every room is reachable from any other
  * using only real doors, no matter how it's played. On top of that: a handful of the remaining 16
  * edges become extra real loop-edges (so it's not one single fragile path), roughly half of
  * what's left after that become permanently-fake trap doors, and the rest stay plain solid walls.
