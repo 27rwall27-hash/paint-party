@@ -25,7 +25,9 @@ import {
   BR_STACK_STAGGER_MIN_MS,
   BR_STACK_THREE_CHANCE,
   BR_STACK_TWO_CHANCE,
+  BR_SUN_EASE_TAU_MS,
   BR_TIMING_JITTER,
+  BR_TOTAL_PLAYERS,
 } from "./battleRoyaleConstants.ts";
 import { FIRST_OBSTACLE_DELAY_MS, MIN_AIRBORNE_BEFORE_CONTACT_MS } from "./constants.ts";
 import type { RacerIdentity } from "./identities.ts";
@@ -87,9 +89,30 @@ export interface BattleRoyaleSession {
   checkpointLevel: number;
   /** Non-null while frozen showing the "X eliminated" pause beat — no spawning, no resolution. */
   checkpointPauseUntil: number | null;
+  /** The leadIn/columnGap rolled once for the CURRENT wave's first obstacle — every stacked
+   * obstacle spawned as part of the same wave reuses these exact values rather than rolling its
+   * own. Independently re-rolling let a stacked obstacle's timing drift far enough from the first's
+   * that the gap between them (at some slots) could shrink to near-zero or even go negative — a
+   * "later" hurdle reaching a column before the "earlier" one did, reported as "impossible hurdle
+   * timings". Sharing timing keeps that gap fixed (exactly the spawn stagger) at every slot. Null
+   * when no wave is currently active. */
+  currentWaveTiming: { leadInMs: number; columnGapMs: number } | null;
+  /** The sun's currently DISPLAYED position (0-1, see battleRoyaleSunTarget) — eases toward the
+   * target on every tick (see updateBattleRoyaleSession) rather than snapping to it the instant an
+   * elimination happens, so the sky visibly drifts rather than jump-cutting after each elimination. */
+  sunT: number;
+  /** Real timestamp of the last updateBattleRoyaleSession call — purely so the sun-easing step above
+   * can compute a real elapsed dt regardless of the caller's own frame timing. */
+  lastTickAt: number;
   startedAt: number;
   phase: "RUNNING" | "RESULTS";
   winnerIdentityId: number | null;
+}
+
+/** Where the sun WANTS to be, given how many of the 24 have been eliminated so far — what sunT
+ * eases toward, not what's actually displayed (see BattleRoyaleSession.sunT). */
+export function battleRoyaleSunTarget(session: BattleRoyaleSession): number {
+  return Math.min(1, session.totalEliminated / (BR_TOTAL_PLAYERS - 1));
 }
 
 function rollCpuSkill(): number {
@@ -122,6 +145,9 @@ export function createBattleRoyaleSession(identities: RacerIdentity[], now: numb
     totalEliminated: 0,
     checkpointLevel: 0,
     checkpointPauseUntil: null,
+    currentWaveTiming: null,
+    sunT: 0,
+    lastTickAt: now,
     startedAt: now,
     phase: "RUNNING",
     winnerIdentityId: null,
@@ -151,10 +177,16 @@ function jittered(value: number, width: number): number {
   return value * (1 + (Math.random() * 2 - 1) * width);
 }
 
-function spawnBrObstacle(session: BattleRoyaleSession, now: number): BattleRoyaleObstacle {
+/** Rolled ONCE per wave (see updateBattleRoyaleSession) and shared by every obstacle in that wave —
+ * see BattleRoyaleSession.currentWaveTiming for why. */
+function rollWaveTiming(session: BattleRoyaleSession): { leadInMs: number; columnGapMs: number } {
   const mult = brSpeedMultiplier(session);
   const leadInMs = jittered(Math.max(BR_LEAD_IN_FLOOR_MS, BR_LEAD_IN_BASE_MS * mult), BR_TIMING_JITTER);
   const columnGapMs = jittered(Math.max(BR_COLUMN_GAP_FLOOR_MS, BR_COLUMN_GAP_BASE_MS * mult), BR_TIMING_JITTER);
+  return { leadInMs, columnGapMs };
+}
+
+function spawnBrObstacle(now: number, timing: { leadInMs: number; columnGapMs: number }): BattleRoyaleObstacle {
   // CPU jump decisions are made lazily, per obstacle, in updateBattleRoyaleSession's decision pass —
   // NOT all up front here at spawn time like an earlier version of this function did. Scheduling
   // every racer's jump for every obstacle immediately at spawn meant a later STACKED obstacle's
@@ -164,7 +196,7 @@ function spawnBrObstacle(session: BattleRoyaleSession, now: number): BattleRoyal
   // own column gap, right after a stacked SECOND obstacle spawned. Deciding lazily, per obstacle,
   // keyed off that obstacle's own reach time, sidesteps the overwrite entirely (see
   // jumpDecidedRacerIds).
-  return { spawnedAt: now, leadInMs, columnGapMs, resolvedRacerIds: new Set(), jumpDecidedRacerIds: new Set() };
+  return { spawnedAt: now, leadInMs: timing.leadInMs, columnGapMs: timing.columnGapMs, resolvedRacerIds: new Set(), jumpDecidedRacerIds: new Set() };
 }
 
 /** A wave has a chance to stack a 2nd hurdle close behind the 1st, and (only if it did) a smaller
@@ -191,6 +223,13 @@ function nextBrSpawnDelay(session: BattleRoyaleSession): number {
 }
 
 export function updateBattleRoyaleSession(session: BattleRoyaleSession, now: number, humanJumpRequested: boolean): void {
+  // Runs every tick regardless of phase/pause state — the sky should keep drifting smoothly even
+  // while the sim itself is frozen for a checkpoint beat or already over.
+  const dtMs = Math.max(0, now - session.lastTickAt);
+  session.lastTickAt = now;
+  const targetSunT = battleRoyaleSunTarget(session);
+  session.sunT += (targetSunT - session.sunT) * (1 - Math.exp(-dtMs / BR_SUN_EASE_TAU_MS));
+
   if (session.phase === "RESULTS") return;
 
   if (session.checkpointPauseUntil !== null) {
@@ -200,12 +239,13 @@ export function updateBattleRoyaleSession(session: BattleRoyaleSession, now: num
 
   if (!session.waveActive && now >= session.nextObstacleAt) {
     session.waveActive = true;
-    session.obstacles.push(spawnBrObstacle(session, now));
+    session.currentWaveTiming = rollWaveTiming(session);
+    session.obstacles.push(spawnBrObstacle(now, session.currentWaveTiming));
     session.pendingStackedAt = rollStackedSpawnTimes(now);
   }
   if (session.pendingStackedAt.length > 0 && now >= session.pendingStackedAt[0]!) {
     session.pendingStackedAt.shift();
-    session.obstacles.push(spawnBrObstacle(session, now));
+    session.obstacles.push(spawnBrObstacle(now, session.currentWaveTiming!));
   }
 
   const human = session.racers.find((r) => r.identityId === 0);
@@ -232,11 +272,27 @@ export function updateBattleRoyaleSession(session: BattleRoyaleSession, now: num
       if (racer.eliminated || racer.identityId === 0) continue;
       if (obstacle.jumpDecidedRacerIds.has(racer.identityId)) continue;
       const reachAt = reachTimeForSlot(obstacle, racer.slot);
-      const decideAt = reachAt - BR_FIXED_JUMP_AIRTIME_MS * 0.6;
-      if (now < decideAt) continue;
+      const idealDecideAt = reachAt - BR_FIXED_JUMP_AIRTIME_MS * 0.6;
+      if (now < idealDecideAt) continue;
       obstacle.jumpDecidedRacerIds.add(racer.identityId);
-      if (isAirborne(racer, now)) continue; // already covering it via an earlier stacked jump
-      if (Math.random() < racer.cpuSkill) racer.jumpStartedAt = decideAt;
+
+      // Project forward rather than just checking isAirborne(now) — a racer mid-jump from an
+      // earlier stacked obstacle might still LAND well before this obstacle's own reach time (the
+      // stagger between stacked obstacles is usually longer than the back half of a jump), in which
+      // case that earlier jump does NOT actually cover this one and a fresh jump still needs
+      // scheduling. Checking only "airborne right now" treated that as free coverage regardless,
+      // which meant most stacked-obstacle jumps were simply never scheduled — CPUs (and the human,
+      // functionally) failing hurdles they had every ability to clear, reported as "impossible
+      // hurdle timings".
+      const currentJumpCovers = isAirborne(racer, reachAt) && reachAt - racer.jumpStartedAt >= MIN_AIRBORNE_BEFORE_CONTACT_MS;
+      if (currentJumpCovers) continue;
+
+      if (Math.random() < racer.cpuSkill) {
+        // Depart at the ideal lead time, or the instant an earlier still-active jump actually lands,
+        // whichever is later — can't launch a second jump before touching back down from the first.
+        const currentLandingAt = isAirborne(racer, now) ? racer.jumpStartedAt + racer.jumpAirtimeMs : -Infinity;
+        racer.jumpStartedAt = Math.max(idealDecideAt, currentLandingAt);
+      }
     }
 
     for (const racer of session.racers) {
@@ -273,6 +329,7 @@ export function updateBattleRoyaleSession(session: BattleRoyaleSession, now: num
 
   if (session.waveActive && session.obstacles.length === 0 && session.pendingStackedAt.length === 0) {
     session.waveActive = false;
+    session.currentWaveTiming = null;
     // Only pause here, at a clean "nothing in flight" boundary — never mid-obstacle, so nobody's
     // jump gets frozen mid-air.
     const newCheckpointLevel = Math.floor(session.totalEliminated / BR_CHECKPOINT_EVERY_ELIMINATIONS);

@@ -5,12 +5,6 @@ import type { RacerIdentity } from "./identities.ts";
 import { isAirborne } from "./RaceInstance.ts";
 import { bandRect, computeSunState, drawBandScene, drawHurdle, drawRacerLabel, drawStickFigure, HUD_HEIGHT, lerp, TERRAIN_BY_INDEX } from "./renderShared.ts";
 
-/** Same day-arc sun as Classic, driven by elimination progress instead of phase progress — the
- * sky reads more dramatic/sunset-y the closer the match gets to a single survivor. */
-function battleRoyaleSunT(session: BattleRoyaleSession): number {
-  return Math.min(1, session.totalEliminated / (BR_TOTAL_PLAYERS - 1));
-}
-
 /** The obstacle's leading-edge x, exactly aligned with reachTimeForSlot so the drawn hurdle is
  * physically over a racer's column at the precise instant that racer's fate resolves — not just a
  * naive two-point lerp from spawnX to the last column, which (since spawnX/targetX are pure screen
@@ -145,7 +139,10 @@ export function renderBattleRoyale(ctx: CanvasRenderingContext2D, session: Battl
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   const identitiesById = new Map<number, RacerIdentity>(session.identities.map((i) => [i.id, i]));
-  const sun = computeSunState(battleRoyaleSunT(session));
+  // session.sunT eases toward its target itself (see updateBattleRoyaleSession) rather than being
+  // derived fresh from totalEliminated here — a single elimination nudges the sky along smoothly
+  // instead of jump-cutting it straight to the new position.
+  const sun = computeSunState(session.sunT);
 
   for (let section = 0; section < BR_SECTIONS; section++) {
     const { y, h } = bandRect(section, BR_SECTIONS);

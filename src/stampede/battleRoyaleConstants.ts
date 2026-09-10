@@ -57,3 +57,8 @@ export const BR_ELIMINATION_FLY_MS = 650;
 // tick (sound.playTick) once per further elimination — "5 remaining", "4 remaining", ... "1
 // remaining" — the same down-to-the-wire cue Paint Party uses for a round's last 5 seconds.
 export const BR_TICK_REMAINING_THRESHOLD = 5;
+
+// The sun's displayed position eases toward its "totalEliminated / (TOTAL-1)" target with this time
+// constant (see BattleRoyaleSession's sunT), rather than snapping there the instant an elimination
+// happens — a single elimination should nudge the sky along smoothly, not jump-cut it.
+export const BR_SUN_EASE_TAU_MS = 3500;
