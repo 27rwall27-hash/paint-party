@@ -60,6 +60,12 @@ export const JUMP_AIRTIME_LAST_MS = 1050;
 export const JUMP_ARC_HEIGHT_FIRST_PX = 28;
 export const JUMP_ARC_HEIGHT_LAST_PX = 82;
 
+// The leap's leg-split angle, measured between the front leg and back leg through the hip — was a
+// flat 180° (a straight line through the pivot), now a slightly closed hurdle-clearing scissor:
+// the front leg stays level/forward, the back leg trails at this angle from it instead of
+// continuing the same straight line.
+export const JUMP_LEG_SPLIT_DEGREES = 140;
+
 // ONE shared obstacle per race — not one per racer. It sweeps across the whole band once per
 // wave, right to left, so it reaches the current 1st place (rightmost column) almost immediately
 // and the current last place (leftmost column) last — each racer still jumps at a different
@@ -169,3 +175,17 @@ export const CPU_BASE_SKILL_MAX = 0.94;
 // skill by up to this much — so the same identity can genuinely diverge across parallel races
 // instead of succeeding/failing in lockstep everywhere.
 export const CPU_SKILL_JITTER = 0.08;
+
+// Leap sound effect — plays the instant a racer actually leaves the ground (not when a CPU's jump
+// is merely scheduled ahead of time). Loud for the human's own jumps, very soft for CPUs, so the
+// player's own timing has an audible cue without the pack turning into a wall of jump noise.
+export const LEAP_VOLUME_HUMAN = 0.9;
+export const LEAP_VOLUME_CPU = 0.12;
+
+// Background music — loops for the whole game, ramping 10% faster every 10 seconds (compounding),
+// capped so it never runs away into an unlistenable chipmunk-speed screech by the end of a long
+// session (1.1^11 ≈ 2.85x, roughly the cap below).
+export const MUSIC_VOLUME = 0.5;
+export const MUSIC_SPEED_STEP_PCT = 0.1;
+export const MUSIC_SPEED_INTERVAL_MS = 10_000;
+export const MUSIC_SPEED_MAX_MULTIPLIER = 2.85;

@@ -2,6 +2,7 @@ import {
   CANVAS_H,
   CANVAS_W,
   GROUND_Y_FRACTION,
+  JUMP_LEG_SPLIT_DEGREES,
   PACK_LEFT_FRACTION,
   PACK_WIDTH_FRACTION,
   POINTS_BY_RANK,
@@ -47,11 +48,13 @@ function bandRect(index: number, bandCount: number): { y: number; h: number } {
 
 // Each race gets its own terrain, keyed by race index (band 0 = the original race, band 1 = the
 // race born at the first split, band 2 = the race born at the second split) — same identity the
-// rest of the game already uses, so no new "which race is which" concept is needed. Only the
-// ground color differs between them; the sky and sun stay identical across all three (see
-// computeSunState) so it genuinely reads as the same sky over three different terrains, not three
-// unrelated scenes.
-const TERRAIN_GROUND_COLORS = ["#5f9a52", "#eec99a", "#d8e8ef"]; // grass, beach, ice
+// rest of the game already uses, so no new "which race is which" concept is needed. The sky and
+// sun stay identical across all three (see computeSunState) so it genuinely reads as the same sky
+// over three different terrains, not three unrelated scenes — only the ground color and a small,
+// muted set of background decorations (see drawTerrainDecorations) differ.
+type Terrain = "grass" | "beach" | "ice";
+const TERRAIN_BY_RACE_INDEX: Terrain[] = ["grass", "beach", "ice"];
+const TERRAIN_GROUND_COLOR: Record<Terrain, string> = { grass: "#5f9a52", beach: "#eec99a", ice: "#d8e8ef" };
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -105,11 +108,66 @@ function computeSunState(t: number): SunState {
   };
 }
 
-/** A gradient sky, one shared sun (see computeSunState), and a flat terrain-colored ground — a
- * fixed backdrop rather than something that scrolls, since the obstacle's own motion already
- * carries the sense of movement. Drawn fresh per band so 2-3 stacked bands each get their own full
- * scene rather than sharing one cropped image. */
-function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number, horizonY: number, sun: SunState, groundColor: string): void {
+/** A small, muted set of background decorations per terrain — deliberately subtle (soft/low-count/
+ * low-contrast, and never near the pack's own columns) so they read as ambient scenery rather than
+ * competing with the hurdle or runners for attention. Drawn after the ground fill so pyramids'
+ * bases sit properly on top of the sand rather than being covered by it. */
+function drawTerrainDecorations(ctx: CanvasRenderingContext2D, terrain: Terrain, y: number, h: number, horizonY: number, now: number): void {
+  if (terrain === "grass") {
+    // A few soft clouds, high in the sky, drifting almost imperceptibly slowly.
+    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+    const clouds: Array<[number, number, number]> = [
+      [0.16, 0.16, 1],
+      [0.4, 0.09, 0.7],
+      [0.6, 0.2, 0.85],
+    ];
+    for (const [xFrac, yFrac, scale] of clouds) {
+      const drift = Math.sin(now / 14000 + xFrac * 9) * 6;
+      const cx = CANVAS_W * xFrac + drift;
+      const cy = y + h * yFrac;
+      const r = 13 * scale;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r * 1.6, r * 0.85, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx - r * 0.9, cy + r * 0.25, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx + r * 0.9, cy + r * 0.25, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (terrain === "beach") {
+    // A couple of small, muted, static pyramid silhouettes on the horizon.
+    ctx.fillStyle = "rgba(120, 88, 58, 0.45)";
+    for (const xFrac of [0.64, 0.78]) {
+      const baseX = CANVAS_W * xFrac;
+      const pyramidH = h * 0.15;
+      ctx.beginPath();
+      ctx.moveTo(baseX, horizonY - pyramidH);
+      ctx.lineTo(baseX - pyramidH * 0.95, horizonY);
+      ctx.lineTo(baseX + pyramidH * 0.95, horizonY);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else {
+    // A sparse scatter of slowly falling snowflakes, confined to the sky so they never cross into
+    // the ground/obstacle row. Deterministic per-index placement (not Math.random()) so flakes
+    // drift smoothly instead of jittering to a new spot every frame.
+    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+    for (let i = 0; i < 9; i++) {
+      const xFrac = (i * 0.6180339887) % 1;
+      const fallMs = 7000 + (i % 4) * 1100;
+      const yFrac = ((now + i * 733) % fallMs) / fallMs;
+      const cx = CANVAS_W * xFrac;
+      const cy = y + h * yFrac * 0.75;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+/** A gradient sky, one shared sun (see computeSunState), a flat terrain-colored ground, and a
+ * small set of muted per-terrain decorations — a fixed backdrop rather than something that
+ * scrolls, since the obstacle's own motion already carries the sense of movement. Drawn fresh per
+ * band so 2-3 stacked bands each get their own full scene rather than sharing one cropped image. */
+function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number, horizonY: number, sun: SunState, terrain: Terrain, now: number): void {
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, y, CANVAS_W, h);
@@ -129,8 +187,10 @@ function drawBandBackground(ctx: CanvasRenderingContext2D, y: number, h: number,
   ctx.fill();
 
   // Flat ground below the horizon — a plain straight boundary, no texture.
-  ctx.fillStyle = groundColor;
+  ctx.fillStyle = TERRAIN_GROUND_COLOR[terrain];
   ctx.fillRect(0, horizonY, CANVAS_W, Math.max(0, y + h - horizonY));
+
+  drawTerrainDecorations(ctx, terrain, y, h, horizonY, now);
 
   ctx.restore();
 }
@@ -186,7 +246,7 @@ function drawStickFigure(
   const shoulderY = hipY - torsoLen;
   const headY = shoulderY - headRadius * 1.15;
 
-  ctx.strokeStyle = "#eee6f0";
+  ctx.strokeStyle = "#0a0a0a";
   ctx.lineWidth = Math.max(2, headRadius * 0.28);
   ctx.lineCap = "round";
 
@@ -197,19 +257,22 @@ function drawStickFigure(
   ctx.stroke();
 
   if (jumping) {
-    // Grand-jeté split: front leg and back leg are mirrored straight through the hip — a true
-    // 180° split (a flat "needle" line through the pivot), not an asymmetric bend — growing wider
-    // as jumpT rises toward the peak; one arm reaches forward (same side as the front leg), the
-    // other back (same side as the back leg) — a dramatic "X" silhouette at the peak, easing
-    // in/out with jumpT (0 at takeoff/landing, 1 at the peak) so it doesn't just pop into place.
+    // Hurdle-clearing scissor: the front leg stays level/forward from the hip; the back leg trails
+    // at JUMP_LEG_SPLIT_DEGREES from it (140° by default) instead of continuing the same straight
+    // line, so the two legs are no longer a flat 180° needle — growing wider as jumpT rises toward
+    // the peak. One arm reaches forward (same side as the front leg), the other back (same side as
+    // the back leg) — a dramatic "X" silhouette at the peak, easing in/out with jumpT (0 at
+    // takeoff/landing, 1 at the peak) so it doesn't just pop into place.
     const legReach = headRadius * (2.0 + 2.4 * jumpT);
+    const backLegRad = (JUMP_LEG_SPLIT_DEGREES * Math.PI) / 180;
     const frontFootX = footX + legReach;
-    const backFootX = footX - legReach;
+    const backFootX = footX + legReach * Math.cos(backLegRad);
+    const backFootY = hipY + legReach * Math.sin(backLegRad);
     ctx.beginPath();
     ctx.moveTo(footX, hipY);
     ctx.lineTo(frontFootX, hipY);
     ctx.moveTo(footX, hipY);
-    ctx.lineTo(backFootX, hipY);
+    ctx.lineTo(backFootX, backFootY);
     ctx.stroke();
 
     const reach = armLen * (1.0 + 0.6 * jumpT);
@@ -281,7 +344,7 @@ function drawStickFigure(
   ctx.stroke();
 }
 
-function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number, sun: SunState, groundColor: string): void {
+function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesById: Map<number, RacerIdentity>, y: number, h: number, now: number, sun: SunState, terrain: Terrain): void {
   // The 8 racers cluster near the left of the band (not spread across its full width) — leaves a
   // long, clearly visible runway on the right where the obstacle is approaching from, and keeps
   // the pack itself tight.
@@ -299,7 +362,7 @@ function drawRace(ctx: CanvasRenderingContext2D, race: RaceInstance, identitiesB
   // (head + torso + legs) needs more total vertical room than a circle alone did.
   const headRadius = radius * 0.55;
 
-  drawBandBackground(ctx, y, h, groundLineY, sun, groundColor);
+  drawBandBackground(ctx, y, h, groundLineY, sun, terrain, now);
 
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.beginPath();
@@ -455,8 +518,8 @@ export function render(ctx: CanvasRenderingContext2D, session: StampedeSession, 
   const sun = computeSunState(sessionProgress(session, now));
   session.races.forEach((race, i) => {
     const { y, h } = bandRect(i, session.races.length);
-    const groundColor = TERRAIN_GROUND_COLORS[i] ?? TERRAIN_GROUND_COLORS[TERRAIN_GROUND_COLORS.length - 1]!;
-    drawRace(ctx, race, identitiesById, y, h, now, sun, groundColor);
+    const terrain = TERRAIN_BY_RACE_INDEX[i] ?? TERRAIN_BY_RACE_INDEX[TERRAIN_BY_RACE_INDEX.length - 1]!;
+    drawRace(ctx, race, identitiesById, y, h, now, sun, terrain);
   });
 
   drawHud(ctx, session, now);
