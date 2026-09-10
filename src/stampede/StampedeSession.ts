@@ -2,6 +2,7 @@ import {
   ABSOLUTE_MAX_SPLIT_WAIT_MS,
   CLUSTER_CHANCE,
   CLUSTER_STAGGER_MAX_MS,
+  CLUSTER_STAGGER_MIN_MS,
   CLUSTER_WINDOW_MS,
   POINTS_BY_RANK,
   PRE_SPLIT_QUIET_MS,
@@ -176,7 +177,9 @@ function applyObstacleClustering(races: RaceInstance[], justResolvedIdx: number[
       if (!anchor || other.nextObstacleAt < anchor.nextObstacleAt) anchor = other;
     }
     if (anchor) {
-      race.nextObstacleAt = anchor.nextObstacleAt + (Math.random() * 2 - 1) * CLUSTER_STAGGER_MAX_MS;
+      const magnitude = CLUSTER_STAGGER_MIN_MS + Math.random() * (CLUSTER_STAGGER_MAX_MS - CLUSTER_STAGGER_MIN_MS);
+      const sign = Math.random() < 0.5 ? -1 : 1;
+      race.nextObstacleAt = anchor.nextObstacleAt + sign * magnitude;
     }
   }
 }

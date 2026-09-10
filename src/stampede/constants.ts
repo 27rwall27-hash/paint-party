@@ -129,9 +129,13 @@ export const MULTI_OBSTACLE_STAGGER_MAX_MS = 750;
 export const CLUSTER_CHANCE = 0.6;
 // Only clusters onto another race's spawn if it's already scheduled within this many ms.
 export const CLUSTER_WINDOW_MS = 900;
-// Small random offset applied even when clustering, so aligned obstacles aren't literally
-// frame-identical every time.
-export const CLUSTER_STAGGER_MAX_MS = 80;
+// Random offset applied even when clustering, so aligned obstacles aren't literally
+// frame-identical — a MINIMUM as well as a max now, not just a small +/- jitter around zero,
+// since the old +/-80ms-with-no-floor version could land close enough to 0 that two clustered
+// hurdles (most noticeably with only two bands active, in TWO_WAY) read as arriving at the exact
+// same instant rather than as two distinct, staggered threats.
+export const CLUSTER_STAGGER_MIN_MS = 250;
+export const CLUSTER_STAGGER_MAX_MS = 650;
 
 // Ground level within a band — a fraction of the band's own height where every runner stands and
 // the shared obstacle travels, matching the classic endless-runner convention (the T-Rex game
