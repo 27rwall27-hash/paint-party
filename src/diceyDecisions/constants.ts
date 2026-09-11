@@ -38,7 +38,12 @@ export const ROUND_CONFIGS: RoundConfig[] = [
 export const POINTS_BY_RANK: number[] = [5, 3, 2, 1];
 
 // --- Round phase timing (ms) ----------------------------------------------------------------
-export const BOX_CLOSED_HOLD_MS = 1200;
+// Full round flow: SLIDING_IN (fresh box slides in from the right) -> SHAKING (closed box
+// rattles in place, dice audibly tumbling inside) -> OPENING (lid swings up) -> PLAYING ->
+// SCORED (winning section glows) -> CLOSING (lid swings shut) -> SLIDING_OUT (box slides off to
+// the left) -> next round's SLIDING_IN, or RESULTS after the last round.
+export const SLIDE_DURATION_MS = 700;
+export const SHAKING_DURATION_MS = 1400;
 export const LID_OPEN_DURATION_MS = 900;
 // Generous but bounded — a round always ends even if someone never commits to an answer. Must
 // comfortably clear the slowest possible CPU reaction (REACTION_SLOW_MS * (1+REACTION_JITTER)
@@ -46,6 +51,15 @@ export const LID_OPEN_DURATION_MS = 900;
 export const PLAYING_TIMEOUT_MS = 16_000;
 export const SCORED_HOLD_MS = 2200;
 export const LID_CLOSE_DURATION_MS = 800;
+
+// How far off-center (world X) a box sits when fully slid out — comfortably outside the camera's
+// frustum at this box's distance/tilt (verified visually, see sceneBuilder.ts's box-slide check).
+export const SLIDE_DISTANCE = 26;
+
+// --- Shake (SHAKING phase) ----------------------------------------------------------------------
+export const SHAKE_AMPLITUDE_X = 0.18;
+export const SHAKE_AMPLITUDE_Z = 0.12;
+export const SHAKE_ROT_AMPLITUDE_RAD = 0.035;
 
 // --- CPU pacing --------------------------------------------------------------------------------
 // Each CPU rolls a persistent 0..1 "skill" once at game start (same convention as every other
@@ -83,12 +97,33 @@ export const LID_OPEN_ANGLE_RAD = Math.PI * 0.62; // past vertical, so it visual
 
 export const FELT_COLOR = 0x1f6b3a;
 export const FELT_COLOR_HOVER = 0x2a8a4d;
-export const WOOD_COLOR = 0x8a5a34;
-export const WOOD_DARK_COLOR = 0x5c3b21;
-export const HOVER_EMISSIVE = 0xffffff;
+// Deep rosewood — a dark, saturated red-brown, not the honey-oak of a first pass.
+export const WOOD_COLOR = 0x5e2029;
+export const WOOD_DARK_COLOR = 0x33141a;
 export const WINNING_EMISSIVE = 0xffd60a;
 
+// "Gleam" comes from MeshPhysicalMaterial's clearcoat layer (a glossy varnish coat on top of the
+// wood grain) rather than an environment map — see boxMaterials.ts.
+export const BOX_CLEARCOAT = 0.55;
+export const BOX_CLEARCOAT_ROUGHNESS = 0.2;
+export const BOX_ROUGHNESS = 0.42;
+
 export const SHADOWS_ENABLED = true;
+
+// --- Peg board (per-section selection markers) --------------------------------------------------
+// Each section has its own small peg board mounted on its north (far-from-camera) wall, with 4
+// holes spaced evenly across it. A player's peg slots into the hole matching how many players
+// picked that section before them (0 = far left = first).
+export const PEG_RADIUS = 0.13;
+export const PEG_LENGTH = 0.55;
+export const PEG_BOARD_HEIGHT = 0.4;
+export const PEG_BOARD_THICKNESS = 0.15;
+export const PEG_BOARD_Y_CENTER = 0.5;
+// Offset south (toward the section's own interior) from the exact grid boundary line, clear of
+// both the outer wall's interior face (flush at the boundary) and a divider's own half-thickness.
+export const PEG_BOARD_WALL_OFFSET = 0.22;
+export const PEG_HOLE_RADIUS = 0.16;
+export const PEG_HOLE_MARGIN_FRACTION = 0.18; // inset from each section's own edges
 
 // --- Camera / lighting -------------------------------------------------------------------------
 export const CAMERA_FOV = 38;

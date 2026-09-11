@@ -1,4 +1,4 @@
-import { FLOOR_DEPTH, FLOOR_WIDTH } from "./constants.ts";
+import { FLOOR_DEPTH, FLOOR_WIDTH, PEG_HOLE_MARGIN_FRACTION } from "./constants.ts";
 
 export interface GridShape {
   cols: number;
@@ -50,4 +50,14 @@ export function sectionBounds(sectionCount: number): SectionBounds[] {
     }
   }
   return bounds;
+}
+
+/** The 4 peg-hole X positions along a section's own north wall, left to right on screen (+X is
+ * screen-right for this game's fixed camera — see sceneBuilder.ts). Shared by both the render
+ * layer (drawing the holes/pegs) and anything that needs to reason about hole positions without
+ * touching three.js. */
+export function sectionPegHoleXs(bounds: SectionBounds): number[] {
+  const margin = bounds.width * PEG_HOLE_MARGIN_FRACTION;
+  const usable = bounds.width - margin * 2;
+  return [0, 1, 2, 3].map((i) => bounds.cx - usable / 2 + (usable * i) / 3);
 }

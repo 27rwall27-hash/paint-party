@@ -17,17 +17,29 @@ import {
   LID_CLOSE_DURATION_MS,
   LID_OPEN_ANGLE_RAD,
   LID_OPEN_DURATION_MS,
-  PLAYER_COUNT,
+  PEG_BOARD_HEIGHT,
+  PEG_BOARD_THICKNESS,
+  PEG_BOARD_WALL_OFFSET,
+  PEG_BOARD_Y_CENTER,
+  PEG_HOLE_RADIUS,
+  PEG_LENGTH,
+  PEG_RADIUS,
   SHADOWS_ENABLED,
+  SHAKE_AMPLITUDE_X,
+  SHAKE_AMPLITUDE_Z,
+  SHAKE_ROT_AMPLITUDE_RAD,
+  SHAKING_DURATION_MS,
+  SLIDE_DISTANCE,
+  SLIDE_DURATION_MS,
   WALL_HEIGHT,
   WALL_THICKNESS,
   WINNING_EMISSIVE,
-  WOOD_COLOR,
   WOOD_DARK_COLOR,
 } from "./constants.ts";
 import { applyDiePlacementRotation, createDiceMaterials, createDieGeometry } from "./diceFactory.ts";
-import { sectionBounds, sectionGridShape } from "./layout.ts";
-import type { DiceyDecisionsSession } from "./DiceyDecisionsSession.ts";
+import { createLidMaterials, createWoodMaterial, disposeLidMaterials } from "./boxMaterials.ts";
+import { sectionBounds, sectionGridShape, sectionPegHoleXs, type SectionBounds } from "./layout.ts";
+import { computeSectionAssignments, type DiceyDecisionsSession } from "./DiceyDecisionsSession.ts";
 
 interface FloorSectionMesh extends THREE.Mesh {
   material: THREE.MeshStandardMaterial;
@@ -37,14 +49,19 @@ export interface SceneContext {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** Everything box-related (base/walls/lid/dividers/felt/dice/peg boards/pegs) hangs off this one
+   * group so the whole box can slide as a unit — lights and the camera stay outside it. */
+  boxRoot: THREE.Group;
   floorSectionMeshes: FloorSectionMesh[];
   dividerGroup: THREE.Group;
   diceGroup: THREE.Group;
+  pegBoardGroup: THREE.Group;
   lidGroup: THREE.Group;
-  markerMeshes: THREE.Mesh[];
-  /** Identity of the last RoundState this context built section/divider/dice meshes for — a new
-   * round object (created fresh by createRoundState every BOX_CLOSED->OPENING transition) means
-   * the geometry needs rebuilding; the same round object means it's still current. */
+  lidMesh: THREE.Mesh;
+  pegMeshes: THREE.Mesh[];
+  /** Identity of the last RoundState this context built section/divider/dice/peg-board geometry
+   * for — a new round object (created fresh by createRoundState every SLIDING_IN/SLIDING_OUT
+   * transition) means it all needs rebuilding; the same round object means it's still current. */
   cachedRound: DiceyDecisionsSession["round"] | null;
 }
 
@@ -52,22 +69,20 @@ function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }
 
-function woodMaterial(color: number): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05 });
+function flatMaterial(color: number): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.05 });
 }
 
-function buildStaticBox(scene: THREE.Scene): THREE.Group {
-  const group = new THREE.Group();
-
+function buildStaticBox(boxRoot: THREE.Group): void {
   const base = new THREE.Mesh(
     new THREE.BoxGeometry(FLOOR_WIDTH + WALL_THICKNESS * 2, FLOOR_THICKNESS, FLOOR_DEPTH + WALL_THICKNESS * 2),
-    woodMaterial(WOOD_DARK_COLOR),
+    flatMaterial(WOOD_DARK_COLOR),
   );
   base.position.y = -FLOOR_THICKNESS / 2;
   base.receiveShadow = true;
-  group.add(base);
+  boxRoot.add(base);
 
-  const wallMat = woodMaterial(WOOD_COLOR);
+  const wallMat = createWoodMaterial();
   const sideWallGeo = new THREE.BoxGeometry(WALL_THICKNESS, WALL_HEIGHT, FLOOR_DEPTH + WALL_THICKNESS * 2);
   const endWallGeo = new THREE.BoxGeometry(FLOOR_WIDTH + WALL_THICKNESS * 2, WALL_HEIGHT, WALL_THICKNESS);
 
@@ -83,40 +98,37 @@ function buildStaticBox(scene: THREE.Scene): THREE.Group {
   for (const wall of [leftWall, rightWall, frontWall, backWall]) {
     wall.castShadow = true;
     wall.receiveShadow = true;
-    group.add(wall);
+    boxRoot.add(wall);
   }
-
-  scene.add(group);
-  return group;
 }
 
-function buildLid(scene: THREE.Scene): THREE.Group {
+function buildLid(boxRoot: THREE.Group, roundNumber: number): { lidGroup: THREE.Group; lidMesh: THREE.Mesh } {
   const lidGroup = new THREE.Group();
   // Hinged at the back wall's top edge (world -Z, the far side from the camera) — opening rotates
   // the lid's free edge up and back over the box, per the standard treasure-chest hinge convention.
   lidGroup.position.set(0, WALL_HEIGHT, -FLOOR_DEPTH / 2 - WALL_THICKNESS / 2);
 
-  const lid = new THREE.Mesh(
+  const lidMesh = new THREE.Mesh(
     new THREE.BoxGeometry(FLOOR_WIDTH + WALL_THICKNESS * 2, WALL_THICKNESS, FLOOR_DEPTH + WALL_THICKNESS * 2),
-    woodMaterial(WOOD_COLOR),
+    createLidMaterials(roundNumber),
   );
-  lid.position.set(0, WALL_THICKNESS / 2, (FLOOR_DEPTH + WALL_THICKNESS * 2) / 2);
-  lid.castShadow = true;
-  lid.receiveShadow = true;
-  lidGroup.add(lid);
+  lidMesh.position.set(0, WALL_THICKNESS / 2, (FLOOR_DEPTH + WALL_THICKNESS * 2) / 2);
+  lidMesh.castShadow = true;
+  lidMesh.receiveShadow = true;
+  lidGroup.add(lidMesh);
 
-  scene.add(lidGroup);
-  return lidGroup;
+  boxRoot.add(lidGroup);
+  return { lidGroup, lidMesh };
 }
 
-function buildMarkers(scene: THREE.Scene, session: DiceyDecisionsSession): THREE.Mesh[] {
-  const geo = new THREE.ConeGeometry(0.4, 1.1, 14);
+function buildPegs(boxRoot: THREE.Group, session: DiceyDecisionsSession): THREE.Mesh[] {
+  const geo = new THREE.CylinderGeometry(PEG_RADIUS, PEG_RADIUS, PEG_LENGTH, 14);
   return session.identities.map((identity) => {
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: identity.color, roughness: 0.4 }));
-    mesh.rotation.x = Math.PI; // point downward, like a marker pin
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: identity.color, roughness: 0.35, metalness: 0.15 }));
+    mesh.rotation.x = Math.PI / 2; // cylinder's length axis -> world Z, so it "inserts" horizontally
     mesh.visible = false;
     mesh.castShadow = SHADOWS_ENABLED;
-    scene.add(mesh);
+    boxRoot.add(mesh);
     return mesh;
   });
 }
@@ -150,30 +162,38 @@ export function createSceneContext(canvas: HTMLCanvasElement, session: DiceyDeci
   }
   scene.add(keyLight);
 
-  buildStaticBox(scene);
-  const lidGroup = buildLid(scene);
+  const boxRoot = new THREE.Group();
+  scene.add(boxRoot);
+
+  buildStaticBox(boxRoot);
+  const { lidGroup, lidMesh } = buildLid(boxRoot, session.roundIndex + 1);
   const dividerGroup = new THREE.Group();
-  scene.add(dividerGroup);
+  boxRoot.add(dividerGroup);
   const diceGroup = new THREE.Group();
-  scene.add(diceGroup);
-  const markerMeshes = buildMarkers(scene, session);
+  boxRoot.add(diceGroup);
+  const pegBoardGroup = new THREE.Group();
+  boxRoot.add(pegBoardGroup);
+  const pegMeshes = buildPegs(boxRoot, session);
 
   return {
     renderer,
     scene,
     camera,
+    boxRoot,
     floorSectionMeshes: [],
     dividerGroup,
     diceGroup,
+    pegBoardGroup,
     lidGroup,
-    markerMeshes,
+    lidMesh,
+    pegMeshes,
     cachedRound: null,
   };
 }
 
 function rebuildFloorAndDividers(ctx: SceneContext, session: DiceyDecisionsSession): void {
   for (const mesh of ctx.floorSectionMeshes) {
-    ctx.scene.remove(mesh);
+    ctx.boxRoot.remove(mesh);
     mesh.geometry.dispose();
     mesh.material.dispose();
   }
@@ -190,12 +210,12 @@ function rebuildFloorAndDividers(ctx: SceneContext, session: DiceyDecisionsSessi
     mesh.position.set(b.cx, 0.001, b.cz);
     mesh.receiveShadow = true;
     mesh.userData.sectionIndex = b.index;
-    ctx.scene.add(mesh);
+    ctx.boxRoot.add(mesh);
     ctx.floorSectionMeshes.push(mesh);
   }
 
   const { cols, rows } = sectionGridShape(session.round.config.sections);
-  const dividerMat = woodMaterial(WOOD_DARK_COLOR);
+  const dividerMat = flatMaterial(WOOD_DARK_COLOR);
   for (let c = 1; c < cols; c++) {
     const x = -FLOOR_WIDTH / 2 + (FLOOR_WIDTH / cols) * c;
     const wall = new THREE.Mesh(new THREE.BoxGeometry(DIVIDER_THICKNESS, DIVIDER_HEIGHT, FLOOR_DEPTH), dividerMat);
@@ -231,9 +251,42 @@ function rebuildDice(ctx: SceneContext, session: DiceyDecisionsSession): void {
   }
 }
 
+function sectionNorthZ(b: SectionBounds): number {
+  return b.cz - b.depth / 2;
+}
+
+/** Every section's own peg board — a slim strip mounted on its north wall with 4 always-visible
+ * dark holes. Rebuilt alongside the floor/dividers whenever the section count changes. */
+function rebuildPegBoards(ctx: SceneContext, session: DiceyDecisionsSession): void {
+  ctx.pegBoardGroup.clear();
+  const bounds = sectionBounds(session.round.config.sections);
+  const boardMat = flatMaterial(WOOD_DARK_COLOR);
+  const holeMat = new THREE.MeshStandardMaterial({ color: 0x120a0c, roughness: 0.9 });
+  const holeGeo = new THREE.CylinderGeometry(PEG_HOLE_RADIUS, PEG_HOLE_RADIUS, 0.05, 12);
+
+  for (const b of bounds) {
+    const northZ = sectionNorthZ(b);
+    const boardCenterZ = northZ + PEG_BOARD_WALL_OFFSET;
+    const board = new THREE.Mesh(new THREE.BoxGeometry(b.width * 0.92, PEG_BOARD_HEIGHT, PEG_BOARD_THICKNESS), boardMat);
+    board.position.set(b.cx, PEG_BOARD_Y_CENTER, boardCenterZ);
+    board.castShadow = true;
+    board.receiveShadow = true;
+    ctx.pegBoardGroup.add(board);
+
+    const boardFrontZ = boardCenterZ + PEG_BOARD_THICKNESS / 2;
+    for (const holeX of sectionPegHoleXs(b)) {
+      const hole = new THREE.Mesh(holeGeo, holeMat);
+      hole.rotation.x = Math.PI / 2;
+      hole.position.set(holeX, PEG_BOARD_Y_CENTER, boardFrontZ - 0.005);
+      ctx.pegBoardGroup.add(hole);
+    }
+  }
+}
+
 function lidOpenProgress(session: DiceyDecisionsSession, now: number): number {
   switch (session.phase) {
-    case "BOX_CLOSED":
+    case "SLIDING_IN":
+    case "SHAKING":
       return 0;
     case "OPENING":
       return clamp01((now - session.phaseStartedAt) / LID_OPEN_DURATION_MS);
@@ -242,30 +295,63 @@ function lidOpenProgress(session: DiceyDecisionsSession, now: number): number {
       return 1;
     case "CLOSING":
       return 1 - clamp01((now - session.phaseStartedAt) / LID_CLOSE_DURATION_MS);
+    case "SLIDING_OUT":
     case "RESULTS":
       return 0;
   }
 }
 
-const MARKER_OFFSET_RADIUS = 1.3;
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3);
+}
+function easeInCubic(t: number): number {
+  return t * t * t;
+}
 
-function updateMarkers(ctx: SceneContext, session: DiceyDecisionsSession): void {
+/** The box's own X offset from center — 0 whenever it's meant to be sitting in place (including
+ * during SHAKING, whose jitter is added separately in shakeOffset). */
+function boxSlideX(session: DiceyDecisionsSession, now: number): number {
+  if (session.phase === "SLIDING_IN") {
+    const t = clamp01((now - session.phaseStartedAt) / SLIDE_DURATION_MS);
+    return SLIDE_DISTANCE * (1 - easeOutCubic(t));
+  }
+  if (session.phase === "SLIDING_OUT") {
+    const t = clamp01((now - session.phaseStartedAt) / SLIDE_DURATION_MS);
+    return -SLIDE_DISTANCE * easeInCubic(t);
+  }
+  if (session.phase === "RESULTS") return -SLIDE_DISTANCE;
+  return 0;
+}
+
+function shakeOffset(session: DiceyDecisionsSession, now: number): { x: number; z: number; rotZ: number } {
+  if (session.phase !== "SHAKING") return { x: 0, z: 0, rotZ: 0 };
+  const t = clamp01((now - session.phaseStartedAt) / SHAKING_DURATION_MS);
+  const envelope = Math.sin(Math.PI * t); // rises then settles back to 0
+  return {
+    x: Math.sin(now * 0.05) * SHAKE_AMPLITUDE_X * envelope,
+    z: Math.cos(now * 0.07) * SHAKE_AMPLITUDE_Z * envelope,
+    rotZ: Math.sin(now * 0.06) * SHAKE_ROT_AMPLITUDE_RAD * envelope,
+  };
+}
+
+/** Fills each section's peg holes left-to-right in per-section selection order (see
+ * computeSectionAssignments) — up to PLAYER_COUNT total pegs exist, each repositioned to wherever
+ * its owner currently sits, hidden if that player hasn't selected this round. */
+function updatePegs(ctx: SceneContext, session: DiceyDecisionsSession): void {
   const bounds = sectionBounds(session.round.config.sections);
-  session.round.selections.forEach((selection, playerId) => {
-    const mesh = ctx.markerMeshes[playerId]!;
-    if (selection.section === null) {
-      mesh.visible = false;
-      return;
-    }
-    const box = bounds[selection.section]!;
-    const angle = (playerId / PLAYER_COUNT) * Math.PI * 2;
+  const assignments = computeSectionAssignments(session.round);
+  for (const mesh of ctx.pegMeshes) mesh.visible = false;
+
+  for (const { playerId, section, holeIndex } of assignments) {
+    const mesh = ctx.pegMeshes[playerId];
+    if (!mesh) continue;
+    const b = bounds[section]!;
+    const holeXs = sectionPegHoleXs(b);
+    const holeX = holeXs[holeIndex] ?? holeXs[holeXs.length - 1]!;
+    const boardFrontZ = sectionNorthZ(b) + PEG_BOARD_WALL_OFFSET + PEG_BOARD_THICKNESS / 2;
+    mesh.position.set(holeX, PEG_BOARD_Y_CENTER, boardFrontZ + PEG_LENGTH * 0.3);
     mesh.visible = true;
-    mesh.position.set(
-      box.cx + Math.cos(angle) * MARKER_OFFSET_RADIUS,
-      2.1,
-      box.cz + Math.sin(angle) * MARKER_OFFSET_RADIUS,
-    );
-  });
+  }
 }
 
 function updateFloorHighlight(ctx: SceneContext, session: DiceyDecisionsSession): void {
@@ -281,18 +367,26 @@ function updateFloorHighlight(ctx: SceneContext, session: DiceyDecisionsSession)
 }
 
 /** Re-derives every visible fact from session/now on every call — ctx's meshes are purely a
- * create-once/mutate-in-place cache, never a second source of truth. Section/divider/dice
- * geometry only gets rebuilt when session.round is a new object (a fresh round started). */
+ * create-once/mutate-in-place cache, never a second source of truth. Section/divider/dice/peg-
+ * board geometry and the lid's "Round N" engraving only get rebuilt when session.round is a new
+ * object (a fresh round started). */
 export function renderDiceyScene(ctx: SceneContext, session: DiceyDecisionsSession, now: number): void {
   if (ctx.cachedRound !== session.round) {
     rebuildFloorAndDividers(ctx, session);
     rebuildDice(ctx, session);
+    rebuildPegBoards(ctx, session);
+    disposeLidMaterials(ctx.lidMesh.material as THREE.Material[]);
+    ctx.lidMesh.material = createLidMaterials(session.roundIndex + 1);
     ctx.cachedRound = session.round;
   }
 
+  const shake = shakeOffset(session, now);
+  ctx.boxRoot.position.set(boxSlideX(session, now) + shake.x, 0, shake.z);
+  ctx.boxRoot.rotation.z = shake.rotZ;
+
   ctx.lidGroup.rotation.x = -lidOpenProgress(session, now) * LID_OPEN_ANGLE_RAD;
   updateFloorHighlight(ctx, session);
-  updateMarkers(ctx, session);
+  updatePegs(ctx, session);
 
   ctx.renderer.render(ctx.scene, ctx.camera);
 }

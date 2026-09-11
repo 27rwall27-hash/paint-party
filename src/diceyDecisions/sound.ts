@@ -46,6 +46,34 @@ function tone(freq: number, startOffset: number, dur: number, type: OscillatorTy
   osc.stop(t0 + dur + 0.02);
 }
 
+/** A flurry of short randomized clacks spread across the SHAKING phase's duration — the box
+ * rattling with dice tumbling around inside before it opens. Scheduled all at once (via
+ * AudioContext's own future-timestamped start(), same technique every tone()/noise call in this
+ * file already uses) rather than re-triggered every frame. */
+export function playDiceShake(durationMs: number): void {
+  const c = getCtx();
+  if (!master) return;
+  const clackCount = Math.round(durationMs / 90);
+  for (let i = 0; i < clackCount; i++) {
+    const offset = (i / clackCount) * (durationMs / 1000) + Math.random() * 0.03;
+    const t0 = c.currentTime + offset;
+    const src = c.createBufferSource();
+    src.buffer = getNoiseBuffer(c);
+    const filter = c.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 500 + Math.random() * 700;
+    filter.Q.value = 2.5;
+    const gain = c.createGain();
+    const peak = 0.1 + Math.random() * 0.12;
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(peak, t0 + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.06 + Math.random() * 0.03);
+    src.connect(filter).connect(gain).connect(master);
+    src.start(t0);
+    src.stop(t0 + 0.1);
+  }
+}
+
 /** A creaking rise as the lid swings open, revealing a fresh round's dice. */
 export function playLidOpen(): void {
   const c = getCtx();

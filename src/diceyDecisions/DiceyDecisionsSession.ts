@@ -5,7 +5,6 @@
 // "session vs. render" split every other game in this suite already uses.
 
 import {
-  BOX_CLOSED_HOLD_MS,
   LID_CLOSE_DURATION_MS,
   LID_OPEN_DURATION_MS,
   PLAYER_COUNT,
@@ -13,13 +12,18 @@ import {
   POINTS_BY_RANK,
   ROUND_CONFIGS,
   SCORED_HOLD_MS,
+  SHAKING_DURATION_MS,
+  SLIDE_DURATION_MS,
   type RoundConfig,
 } from "./constants.ts";
 import { createCpuDiceyPlan, rollCpuSkill, type CpuDiceyPlan } from "./cpuBrain.ts";
 import { computeWinningSection, generateDicePlacements, generateSections, type DiePlacement, type SectionData } from "./diceGen.ts";
 import type { PlayerIdentity } from "./identities.ts";
 
-export type DiceyDecisionsPhase = "BOX_CLOSED" | "OPENING" | "PLAYING" | "SCORED" | "CLOSING" | "RESULTS";
+// SLIDING_IN: a fresh (closed) box slides in from the right. SHAKING: it rattles in place, dice
+// audibly tumbling inside. OPENING/PLAYING/SCORED/CLOSING: unchanged. SLIDING_OUT: the (closed)
+// box slides off to the left, then either the next round's SLIDING_IN or RESULTS.
+export type DiceyDecisionsPhase = "SLIDING_IN" | "SHAKING" | "OPENING" | "PLAYING" | "SCORED" | "CLOSING" | "SLIDING_OUT" | "RESULTS";
 
 export interface PlayerSelection {
   section: number | null;
@@ -56,6 +60,7 @@ export interface DiceyDecisionsSession {
   // updateDiceyDecisionsSession call to dispatch one-shot sounds.
   lidOpenedThisTick: boolean;
   lidClosedThisTick: boolean;
+  shakingStartedThisTick: boolean;
   selectionsThisTick: { playerId: number; correct: boolean }[];
   roundScoredThisTick: boolean;
 }
@@ -91,12 +96,13 @@ export function createDiceyDecisionsSession(identities: PlayerIdentity[], now: n
     totalScores: new Array(PLAYER_COUNT).fill(0),
     roundIndex: 0,
     round: createRoundState(0),
-    phase: "BOX_CLOSED",
+    phase: "SLIDING_IN",
     phaseStartedAt: now,
     humanHoveredSection: null,
     cpuPlans: new Array(PLAYER_COUNT).fill(null),
     lidOpenedThisTick: false,
     lidClosedThisTick: false,
+    shakingStartedThisTick: false,
     selectionsThisTick: [],
     roundScoredThisTick: false,
   };
@@ -122,9 +128,36 @@ export function computeRoundScores(round: RoundState): number[] {
   return points;
 }
 
+export interface PegAssignment {
+  playerId: number;
+  section: number;
+  /** 0 = far left (first player to pick that section), up to 3 = far right. */
+  holeIndex: number;
+}
+
+/** Per-SECTION arrival order (not overall correctness/rank) — whoever picks a given section
+ * first gets that section's leftmost hole, regardless of whether the section turns out to be
+ * right or wrong. Purely derived from round.selections, safe to recompute every render call. */
+export function computeSectionAssignments(round: RoundState): PegAssignment[] {
+  const bySection = new Map<number, { playerId: number; selectedAt: number }[]>();
+  round.selections.forEach((sel, playerId) => {
+    if (sel.section === null || sel.selectedAt === null) return;
+    const list = bySection.get(sel.section) ?? [];
+    list.push({ playerId, selectedAt: sel.selectedAt });
+    bySection.set(sel.section, list);
+  });
+  const out: PegAssignment[] = [];
+  for (const [section, entries] of bySection) {
+    entries.sort((a, b) => a.selectedAt - b.selectedAt);
+    entries.forEach((entry, holeIndex) => out.push({ playerId: entry.playerId, section, holeIndex }));
+  }
+  return out;
+}
+
 export function updateDiceyDecisionsSession(session: DiceyDecisionsSession, now: number, input: DiceyDecisionsInput): void {
   session.lidOpenedThisTick = false;
   session.lidClosedThisTick = false;
+  session.shakingStartedThisTick = false;
   session.selectionsThisTick = [];
   session.roundScoredThisTick = false;
 
@@ -133,9 +166,16 @@ export function updateDiceyDecisionsSession(session: DiceyDecisionsSession, now:
   session.humanHoveredSection = input.hoveredSection;
 
   switch (session.phase) {
-    case "BOX_CLOSED":
-      if (now - session.phaseStartedAt >= BOX_CLOSED_HOLD_MS) {
-        session.round = createRoundState(session.roundIndex);
+    case "SLIDING_IN":
+      if (now - session.phaseStartedAt >= SLIDE_DURATION_MS) {
+        session.phase = "SHAKING";
+        session.phaseStartedAt = now;
+        session.shakingStartedThisTick = true;
+      }
+      return;
+
+    case "SHAKING":
+      if (now - session.phaseStartedAt >= SHAKING_DURATION_MS) {
         session.phase = "OPENING";
         session.phaseStartedAt = now;
         session.lidOpenedThisTick = true;
@@ -190,9 +230,17 @@ export function updateDiceyDecisionsSession(session: DiceyDecisionsSession, now:
     case "CLOSING":
       if (now - session.phaseStartedAt >= LID_CLOSE_DURATION_MS) {
         session.lidClosedThisTick = true;
+        session.phase = "SLIDING_OUT";
+        session.phaseStartedAt = now;
+      }
+      return;
+
+    case "SLIDING_OUT":
+      if (now - session.phaseStartedAt >= SLIDE_DURATION_MS) {
         if (session.roundIndex + 1 < ROUND_CONFIGS.length) {
           session.roundIndex++;
-          session.phase = "BOX_CLOSED";
+          session.round = createRoundState(session.roundIndex);
+          session.phase = "SLIDING_IN";
         } else {
           session.phase = "RESULTS";
         }

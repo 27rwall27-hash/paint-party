@@ -1,5 +1,5 @@
 import "./style.css";
-import { ROUND_CONFIGS } from "./constants.ts";
+import { ROUND_CONFIGS, SHAKING_DURATION_MS } from "./constants.ts";
 import { createIdentities } from "./identities.ts";
 import {
   createDiceyDecisionsSession,
@@ -56,9 +56,16 @@ playAgainBtn.addEventListener("click", () => {
   playAgainBtn.hidden = true;
 });
 
+const PHASE_LABELS: Partial<Record<DiceyDecisionsSession["phase"], string>> = {
+  SHAKING: "Shaking...",
+  PLAYING: "Pick the highest total!",
+  SCORED: "Round over!",
+  RESULTS: "Final results",
+};
+
 function updateHud(s: DiceyDecisionsSession): void {
   const roundLabel = `Round ${s.roundIndex + 1} / ${ROUND_CONFIGS.length}`;
-  const phaseLabel = s.phase === "PLAYING" ? "Pick the highest total!" : s.phase === "SCORED" ? "Round over!" : s.phase === "RESULTS" ? "Final results" : "";
+  const phaseLabel = PHASE_LABELS[s.phase] ?? "";
   const scores = s.identities.map((identity, i) => `${identity.name}: ${s.totalScores[i]}`).join("  ·  ");
   hud.textContent = `${roundLabel}   ${phaseLabel}   —   ${scores}`;
 }
@@ -71,6 +78,7 @@ function loop(time: number): void {
 
     if (session.lidOpenedThisTick) sound.playLidOpen();
     if (session.lidClosedThisTick) sound.playLidClose();
+    if (session.shakingStartedThisTick) sound.playDiceShake(SHAKING_DURATION_MS);
     for (const event of session.selectionsThisTick) {
       if (event.playerId === 0) {
         if (event.correct) sound.playCorrect(true);
