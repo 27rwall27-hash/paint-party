@@ -244,15 +244,33 @@ function drawRooms(ctx: CanvasRenderingContext2D, session: LightMazeSession, lay
         const visited = cell.visitedByPlayer[playerId];
         if (visited) {
           const player = session.players[playerId]!;
+          const color = session.identities[playerId]!.color;
           const fullyLit = player.coloredRoomCount >= TOTAL_ROOMS;
           if (fullyLit) {
+            // A big, dense blurred halo — drawn twice through the same shadow to compound it,
+            // since a single pass at this tile size reads as barely more than a faint fringe.
             ctx.save();
-            ctx.shadowColor = session.identities[playerId]!.color;
-            ctx.shadowBlur = 6 + pulse * 14;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 22 + pulse * 30;
+            ctx.fillStyle = color;
+            ctx.fillRect(tileLeft, tileTop, tileSize, tileSize);
+            ctx.fillRect(tileLeft, tileTop, tileSize, tileSize);
+            ctx.restore();
+
+            // A bright, pulsing core (lightened toward warm white-gold at the peak) so the tile
+            // itself visibly flares, not just its surrounding halo.
+            ctx.fillStyle = lerpColor(color, "#fff7d6", 0.3 + pulse * 0.45);
+            ctx.fillRect(tileLeft, tileTop, tileSize, tileSize);
+
+            // A crisp pulsing outline just outside the tile — keeps it legible as a distinct
+            // square against its own halo instead of just dissolving into a blurred blob.
+            ctx.strokeStyle = `rgba(255, 247, 214, ${(0.55 + 0.45 * pulse).toFixed(2)})`;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(tileLeft - 1.5, tileTop - 1.5, tileSize + 3, tileSize + 3);
+          } else {
+            ctx.fillStyle = color;
+            ctx.fillRect(tileLeft, tileTop, tileSize, tileSize);
           }
-          ctx.fillStyle = session.identities[playerId]!.color;
-          ctx.fillRect(tileLeft, tileTop, tileSize, tileSize);
-          if (fullyLit) ctx.restore();
         } else {
           ctx.strokeStyle = "rgba(255,255,255,0.08)";
           ctx.lineWidth = 2;
