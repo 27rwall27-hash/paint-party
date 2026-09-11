@@ -9,6 +9,7 @@ export default defineConfig({
         paintParty: fileURLToPath(new URL("./paint-party/index.html", import.meta.url)),
         stampedeSprint: fileURLToPath(new URL("./stampede-sprint/index.html", import.meta.url)),
         lightMaze: fileURLToPath(new URL("./light-maze/index.html", import.meta.url)),
+        diceyDecisions: fileURLToPath(new URL("./dicey-decisions/index.html", import.meta.url)),
       },
     },
   },
