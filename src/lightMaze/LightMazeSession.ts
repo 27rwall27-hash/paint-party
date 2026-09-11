@@ -14,6 +14,7 @@ import {
   GRID_SIZE,
   PLAYER_RADIUS,
   PLAYER_SPEED,
+  RESHUT_INTERVAL_MS,
   TOTAL_ROOMS,
   VESTIBULE_DEPTH,
   VESTIBULE_LATERAL_CLAMP,
@@ -91,11 +92,14 @@ export interface LightMazeSession {
   loserId: number | null;
   endingStartedAt: number | null;
   failedAttemptMarker: FailedAttemptMarker | null;
+  /** Next real timestamp every currently-open door reshuts — see RESHUT_INTERVAL_MS. */
+  nextReshutAt: number;
   // Edge-triggered, cleared at the start of every tick — main.ts reads these after each
   // updateLightMazeSession call to dispatch one-shot sounds.
   doorOpenedThisTick: { byPlayerId: number }[];
   humanDoorFailedThisTick: boolean;
   exitedThisTick: number[];
+  doorsReshutThisTick: boolean;
 }
 
 export interface LightMazeInput {
@@ -115,6 +119,20 @@ function markRoomVisited(session: LightMazeSession, player: PlayerState): void {
   if (cell.visitedByPlayer[player.id]) return;
   cell.visitedByPlayer[player.id] = true;
   player.coloredRoomCount++;
+}
+
+/** Flips every currently-open edge back to closed-real, all at once — still the same real door,
+ * still always reopenable on the next attempt, just needs it again. Rooms already colored stay
+ * colored; this only ever touches door state. */
+function reshutAllOpenDoors(session: LightMazeSession, now: number): void {
+  let any = false;
+  for (const edge of session.grid.edges.values()) {
+    if (edge.state !== "open") continue;
+    edge.state = "closed-real";
+    edge.animStartedAt = now;
+    any = true;
+  }
+  if (any) session.doorsReshutThisTick = true;
 }
 
 function doExit(session: LightMazeSession, player: PlayerState, now: number): void {
@@ -168,9 +186,11 @@ export function createLightMazeSession(identities: PlayerIdentity[], now: number
     loserId: null,
     endingStartedAt: null,
     failedAttemptMarker: null,
+    nextReshutAt: now + RESHUT_INTERVAL_MS,
     doorOpenedThisTick: [],
     humanDoorFailedThisTick: false,
     exitedThisTick: [],
+    doorsReshutThisTick: false,
   };
 }
 
@@ -370,10 +390,16 @@ export function updateLightMazeSession(session: LightMazeSession, now: number, i
   session.doorOpenedThisTick = [];
   session.humanDoorFailedThisTick = false;
   session.exitedThisTick = [];
+  session.doorsReshutThisTick = false;
 
   if (session.phase === "ENDING") {
     if (now - session.endingStartedAt! >= DOOR_SWING_SHUT_MS + ENDING_HOLD_MS) session.phase = "RESULTS";
     return; // frozen — no movement/CPU updates
+  }
+
+  if (now >= session.nextReshutAt) {
+    reshutAllOpenDoors(session, now);
+    session.nextReshutAt = now + RESHUT_INTERVAL_MS;
   }
 
   const human = session.players[0]!;

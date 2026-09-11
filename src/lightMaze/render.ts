@@ -103,13 +103,21 @@ function computeEdgeGeom(
   return { doorStart, doorEnd, wallStart, wallEnd, wallDir, perpDir, doorLen };
 }
 
+/** 0 = fully closed/flush along the door's own wall, 1 = fully open/flush along the perpendicular
+ * wall. `animStartedAt` marks the instant the edge's state LAST changed (see grid.ts) — whether
+ * that was opening (swing 0->1) or a periodic reshut closing it again (swing 1->0), same field,
+ * direction picked off the edge's CURRENT state. End-of-game is its own separate sweep, keyed off
+ * the whole session's endingStartedAt rather than any one edge, since every open door closes at
+ * once there regardless of when each one individually last opened. */
 function doorSwingT(session: LightMazeSession, edge: DoorEdge, now: number): number {
   if (session.phase === "ENDING" && edge.state === "open") {
     const t = Math.min(1, Math.max(0, (now - session.endingStartedAt!) / DOOR_SWING_SHUT_MS));
     return 1 - t;
   }
-  if (edge.state !== "open" || edge.animStartedAt === null) return 0;
-  return Math.min(1, (now - edge.animStartedAt) / DOOR_SWING_OPEN_MS);
+  if (edge.animStartedAt === null) return 0;
+  const elapsed = now - edge.animStartedAt;
+  if (edge.state === "open") return Math.min(1, elapsed / DOOR_SWING_OPEN_MS);
+  return Math.max(0, 1 - elapsed / DOOR_SWING_SHUT_MS);
 }
 
 function drawWallsAndDoors(ctx: CanvasRenderingContext2D, session: LightMazeSession, layout: Layout, now: number): void {

@@ -63,10 +63,20 @@ export type CpuAction = { type: "wait" } | { type: "move"; dir: Side; target: Ro
  *   4. Else (backtrack stack fully unwound) -> exit.
  *
  * This terminates for any maze shape: rule 1 only ever grows `visited` (bounded by TOTAL_ROOMS),
- * rule 2 only ever permanently resolves one closed edge at the current room (bounded by <=4 per
- * room, monotonic, never re-attempted), and rule 3 only ever shrinks `stack` (bounded below by 1)
- * — none of these can regress, so eventually every reachable room is visited, every closed door
- * anywhere on the stack is resolved, the stack unwinds to length 1, and rule 4 fires. */
+ * rule 2 only ever permanently resolves one FAKE edge at the current room (bounded by <=4 per
+ * room, never re-attempted once confirmed fake), and rule 3 only ever shrinks `stack` (bounded
+ * below by 1) — none of these can regress, so eventually every reachable room is visited, every
+ * closed door anywhere on the stack is resolved, the stack unwinds to length 1, and rule 4 fires.
+ *
+ * A real edge is NOT permanently resolved by rule 2 the same way a fake one is — the periodic
+ * reshut (see RESHUT_INTERVAL_MS) can flip an already-opened real edge back to `closed-real`,
+ * and rule 2 will cheerfully re-open it (`triedFakeEdges` only ever gates fakes). That's fine for
+ * termination: since reading `edge.state` fresh every call, rule 2 always intercepts a reshut edge
+ * on the CPU's own path (backtrack included — rule 2 checks every direction from the current room,
+ * not just unexplored ones) before rule 3 could ever blindly move through a door that's since shut
+ * again. Each individual reopen is instant (real doors always succeed first try), so a reshut only
+ * ever costs a CPU a handful of extra decision ticks re-covering ground it already knew, never a
+ * stall. */
 export function decideCpuAction(grid: MazeGrid, cpu: CpuBrain, currentRoom: RoomId, now: number): CpuAction {
   if (now < cpu.nextDecisionAt) return { type: "wait" };
 

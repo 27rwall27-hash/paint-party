@@ -77,6 +77,7 @@ function loop(time: number): void {
     for (const event of session.doorOpenedThisTick) sound.playDoorOpen(event.byPlayerId === 0);
     if (session.humanDoorFailedThisTick) sound.playDoorFail();
     for (const playerId of session.exitedThisTick) sound.playExit(playerId === 0);
+    if (session.doorsReshutThisTick) sound.playDoorsReshut();
     if (session.phase === "ENDING" && !wasEnding) sound.playGameOver();
     wasEnding = session.phase === "ENDING";
 

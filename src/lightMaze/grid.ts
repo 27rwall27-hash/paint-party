@@ -31,8 +31,9 @@ export function roomEquals(a: RoomId, b: RoomId): boolean {
 /** `none` = solid wall, never interactive. `closed-real` = opens unconditionally on the first
  * attempt, by anyone. `closed-fake` = looks identical to a real closed door but never opens, no
  * matter who tries or how many times — the deliberate "remember which doors don't open" trap.
- * `open` = a former closed-real door that's been opened — global, permanent, passable by
- * everyone from then on. */
+ * `open` = a former closed-real door that's been opened — global, passable by everyone from then
+ * on, UNTIL the next periodic reshut (see RESHUT_INTERVAL_MS) flips it back to `closed-real` —
+ * still the same real door, still freely reopenable, just needs it again. */
 export type DoorState = "none" | "closed-real" | "closed-fake" | "open";
 
 export interface DoorEdge {
@@ -40,9 +41,10 @@ export interface DoorEdge {
   roomA: RoomId;
   roomB: RoomId;
   state: DoorState;
-  /** Set the instant this edge flips to "open" — drives the swing-open hinge animation in
-   * render.ts. Never reset back to null; the end-of-game "swing shut" sweep computes its own
-   * closing progress from session.endingStartedAt instead of touching every edge individually. */
+  /** Set the instant this edge's state last changed to `open` OR was reshut back to
+   * `closed-real` — drives BOTH the swing-open and swing-shut hinge animations in render.ts
+   * (which one depends on the edge's current `state`). Untouched by a `closed-fake` failed
+   * attempt, since that never changes `state` at all. */
   animStartedAt: number | null;
 }
 

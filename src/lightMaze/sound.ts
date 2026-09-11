@@ -123,3 +123,34 @@ export function playGameOver(): void {
   rattle.start(t0);
   rattle.stop(t0 + 0.32);
 }
+
+/** A lighter, quicker version of playGameOver's thud-and-rattle — the periodic "every open door
+ * reshuts" reset, distinct from the final door-slam so the two don't read as the same event. */
+export function playDoorsReshut(): void {
+  const c = getCtx();
+  if (!master) return;
+  const t0 = c.currentTime;
+
+  const boom = c.createOscillator();
+  const boomGain = c.createGain();
+  boom.type = "sine";
+  boom.frequency.setValueAtTime(220, t0);
+  boom.frequency.exponentialRampToValueAtTime(70, t0 + 0.22);
+  boomGain.gain.setValueAtTime(0.34, t0);
+  boomGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.26);
+  boom.connect(boomGain).connect(master);
+  boom.start(t0);
+  boom.stop(t0 + 0.28);
+
+  const rattle = c.createBufferSource();
+  rattle.buffer = getNoiseBuffer(c);
+  const filter = c.createBiquadFilter();
+  filter.type = "highpass";
+  filter.frequency.value = 1500;
+  const rattleGain = c.createGain();
+  rattleGain.gain.setValueAtTime(0.14, t0);
+  rattleGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.16);
+  rattle.connect(filter).connect(rattleGain).connect(master);
+  rattle.start(t0);
+  rattle.stop(t0 + 0.18);
+}

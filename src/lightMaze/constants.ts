@@ -73,6 +73,11 @@ export const FAILED_MARKER_MS = 550;
 // a beat to let the shutting animation actually read before the screen changes again.
 export const ENDING_HOLD_MS = 700;
 
+// Every this many ms of real gameplay, every currently-open door swings shut again (back to
+// closed-real, not fake — still freely reopenable, just needs it again) — a recurring reset that
+// keeps the maze from just staying solved once everyone's opened their way through it once.
+export const RESHUT_INTERVAL_MS = 20_000;
+
 // --- CPU pacing -------------------------------------------------------------------------------
 // Each CPU rolls a persistent 0..1 "skill" once at game start (Stampede's rollCpuSkill
 // convention) that governs how quickly it decides what to do next — higher skill = faster, more
