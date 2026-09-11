@@ -16,8 +16,8 @@ export const CPU_NAME_PREFIX = "CPU";
 
 // --- Ingredients -----------------------------------------------------------------------------
 // A master pool of original potion ingredients — each round draws a random subset of these (no
-// two rounds necessarily look the same), never the full list at once for the early, easier
-// rounds. Everything is procedurally drawn (see render.ts's glyph functions), no image assets.
+// two rounds necessarily look the same). Everything is procedurally drawn (see bottleTexture.ts's
+// glyph functions), no image assets.
 export type Glyph = "flame" | "moon" | "cap" | "snowflake" | "skull" | "berry" | "leaf" | "star" | "feather" | "drop" | "thorn" | "spiral" | "sparkle" | "swirl";
 
 export interface IngredientDef {
@@ -45,20 +45,24 @@ export const INGREDIENTS: IngredientDef[] = [
 ];
 
 // --- Rounds -------------------------------------------------------------------------------
-// {poolSize, callListLength, callIntervalMs} per round — pool grows, the called list gets both
-// longer AND faster, mirroring the source minigame's own difficulty curve (a rapid-fire list
-// where the final items are barely readable). poolSize is always <= INGREDIENTS.length.
+// Each round picks `distinctTypeCount` random ingredient types; each gets a random number of
+// physical bottle copies on the shelf (1..maxCopiesPerType) — the SAME potion can sit on the
+// shelf more than once, and can be safely poured once per physical copy. The witch's (now the
+// cauldron's own) called list is drawn from those distinct types with replacement; how many
+// times a type is called determines how many of its physical copies are safe to pour, capped by
+// however many copies actually exist.
 export interface RoundConfig {
-  poolSize: number;
+  distinctTypeCount: number;
+  maxCopiesPerType: number;
   callListLength: number;
   callIntervalMs: number;
 }
 export const ROUND_CONFIGS: RoundConfig[] = [
-  { poolSize: 8, callListLength: 9, callIntervalMs: 650 },
-  { poolSize: 8, callListLength: 10, callIntervalMs: 520 },
-  { poolSize: 10, callListLength: 12, callIntervalMs: 430 },
-  { poolSize: 10, callListLength: 13, callIntervalMs: 350 },
-  { poolSize: 12, callListLength: 15, callIntervalMs: 280 },
+  { distinctTypeCount: 5, maxCopiesPerType: 2, callListLength: 7, callIntervalMs: 650 },
+  { distinctTypeCount: 6, maxCopiesPerType: 2, callListLength: 8, callIntervalMs: 550 },
+  { distinctTypeCount: 6, maxCopiesPerType: 3, callListLength: 10, callIntervalMs: 450 },
+  { distinctTypeCount: 7, maxCopiesPerType: 3, callListLength: 11, callIntervalMs: 380 },
+  { distinctTypeCount: 8, maxCopiesPerType: 3, callListLength: 13, callIntervalMs: 300 },
 ];
 
 // Survivor (last one un-eliminated) scores highest, then by how long each eliminated player
@@ -70,16 +74,56 @@ export const INTRO_HOLD_MS = 1400;
 export const CALLING_LEAD_MS = 500; // brief pause before the first item flashes
 export const CALLING_TAIL_MS = 500; // brief pause after the last item, before picking begins
 export const HUMAN_TURN_TIMEOUT_MS = 7000;
-export const TURN_REVEAL_HOLD_MS = 900; // how long the safe-glow / backfire plays before advancing
 export const SCORED_HOLD_MS = 2400;
+
+// --- Turn choreography (ms) -------------------------------------------------------------------
+// Every turn — human or CPU — is a real walk: to the shelf, pick up the chosen bottle, carry it
+// to the cauldron, pour (resolved here), then walk back. Exactly one player animates at a time.
+export const WALK_DURATION_MS = 1100;
+export const PICKUP_HOLD_MS = 350;
+export const POUR_HOLD_MS = 750;
 
 // --- CPU pacing --------------------------------------------------------------------------------
 // Each CPU rolls a persistent 0..1 "skill" once at game start (same convention as every other
-// game's rollCpuSkill) governing both recall accuracy and how fast it commits to a pick.
+// game's rollCpuSkill) governing both recall accuracy and how long it pauses (deciding, at its
+// home spot) before setting off toward the shelf.
 export const ACCURACY_MIN = 0.45;
 export const ACCURACY_MAX = 0.93;
-export const THINK_SLOW_MS = 2600;
-export const THINK_FAST_MS = 900;
-export const THINK_JITTER = 0.25;
+export const DECIDE_SLOW_MS = 1300;
+export const DECIDE_FAST_MS = 350;
+export const DECIDE_JITTER = 0.25;
 
-export const SHELF_COLS = 4;
+// --- 3D world layout (world units) -------------------------------------------------------------
+export const ROOM_WIDTH = 22;
+export const ROOM_DEPTH = 17;
+export const WALL_HEIGHT = 6.5;
+
+export const SHELF_Z = -ROOM_DEPTH / 2 + 1.6;
+export const SHELF_Y = 1.15;
+export const SHELF_WIDTH = ROOM_WIDTH - 3;
+
+export const CAULDRON_X = 0;
+export const CAULDRON_Z = -1.2;
+export const CAULDRON_RADIUS = 1.6;
+// Where a carried bottle gets poured — just south (camera-side) of the cauldron's own rim.
+export const CAULDRON_POUR_Z = CAULDRON_Z + CAULDRON_RADIUS + 0.9;
+
+export const PLAYER_HOME_POSITIONS: { x: number; z: number }[] = [
+  { x: -3.4, z: 5.6 },
+  { x: 3.4, z: 5.6 },
+  { x: -7.2, z: 2.4 },
+  { x: 7.2, z: 2.4 },
+];
+
+export const BOTTLE_RADIUS = 0.32;
+export const BOTTLE_HEIGHT = 0.85;
+export const CHARACTER_RADIUS = 0.42;
+export const CHARACTER_HEIGHT = 1.55;
+
+export const CAMERA_FOV = 44;
+export const CAMERA_HEIGHT = 11.5;
+export const CAMERA_BACK = 12.5;
+export const AMBIENT_LIGHT_INTENSITY = 1.3;
+export const KEY_LIGHT_INTENSITY = 2.1;
+export const ENVIRONMENT_INTENSITY = 0.6;
+export const SHADOWS_ENABLED = true;

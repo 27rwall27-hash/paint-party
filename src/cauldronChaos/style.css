@@ -67,6 +67,33 @@ body {
   cursor: pointer;
 }
 
+#banner {
+  position: absolute;
+  left: 50%;
+  top: 18%;
+  transform: translate(-50%, -50%);
+  background: rgba(15, 9, 22, 0.85);
+  border: 3px solid #ffd60a;
+  border-radius: 16px;
+  padding: 18px 34px;
+  text-align: center;
+  pointer-events: none;
+  min-width: 260px;
+}
+
+.bannerTitle {
+  color: #fff;
+  font-size: 30px;
+  font-weight: 800;
+}
+
+.bannerSub {
+  color: #d8cfe8;
+  font-size: 17px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
 #setupPanel {
   width: 100%;
   background: #241f29;

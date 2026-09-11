@@ -1,8 +1,10 @@
-// Cauldron Chaos' core session: a witch calls out a rapid-fire list of potion ingredients, then
-// players take turns pouring a bottle from the shelf into the cauldron. A correct, not-yet-used
-// ingredient is safe; anything else backfires and that player is out for the round. Turn-based,
-// last one standing scores highest. Deliberately framework-free (no canvas/DOM) — every drawing
-// concern stays in render.ts, the same "session vs. render" split every game in this suite uses.
+// Cauldron Chaos' core session: the cauldron reveals a rapid-fire list of potion ingredients,
+// then players take turns walking to the shelf, picking up a bottle, and carrying it to the
+// cauldron to pour. The same ingredient can sit on the shelf as several physical bottles — each
+// copy can be safely poured once, as long as its type was actually on the list. Anything else
+// backfires and that player is out for the round. Deliberately framework-free (no three.js/DOM)
+// — every camera/mesh/animation concern stays in the render layer, the same "session vs. render"
+// split every game in this suite uses.
 
 import {
   CALLING_LEAD_MS,
@@ -10,11 +12,13 @@ import {
   HUMAN_TURN_TIMEOUT_MS,
   INGREDIENTS,
   INTRO_HOLD_MS,
+  PICKUP_HOLD_MS,
   PLAYER_COUNT,
   POINTS_BY_SURVIVAL_RANK,
+  POUR_HOLD_MS,
   ROUND_CONFIGS,
   SCORED_HOLD_MS,
-  TURN_REVEAL_HOLD_MS,
+  WALK_DURATION_MS,
   type RoundConfig,
 } from "./constants.ts";
 import { decideCpuPick, rollCpuSkill, type CpuPickPlan } from "./cpuBrain.ts";
@@ -22,31 +26,43 @@ import type { PlayerIdentity } from "./identities.ts";
 
 export type CauldronChaosPhase = "INTRO" | "CALLING" | "PICKING" | "SCORED" | "RESULTS";
 
+export type TurnPhase = "AWAITING" | "DECIDING" | "WALK_TO_SHELF" | "PICKUP" | "WALK_TO_CAULDRON" | "POUR" | "WALK_BACK";
+
+export interface ShelfSlot {
+  slotId: number;
+  typeId: number;
+}
+
 export interface LastPick {
   playerId: number;
-  ingredientId: number;
+  slotId: number;
+  typeId: number;
   safe: boolean;
 }
 
 export interface RoundState {
   roundIndex: number;
   config: RoundConfig;
-  poolIds: number[];
+  shelfSlots: ShelfSlot[];
   calledIds: number[];
-  remainingSafeIds: number[];
-  usedIds: number[];
+  /** Per ingredient TYPE id, how many more physical copies of it are still safe to pour. */
+  remainingSafeCountByType: Record<number, number>;
+  usedSlotIds: number[];
   turnOrder: number[];
   turnPointer: number;
   activePlayers: boolean[];
   eliminatedOrder: number[];
-  survivor: number | null;
+  /** Normally one player (down to a single survivor). Can be more than one if the shelf's entire
+   * physical supply gets safely exhausted before the round narrows to 1 — see advanceAfterTurn. */
+  survivors: number[];
   scoresAwarded: number[] | null;
-  turnSubPhase: "AWAITING" | "REVEAL";
+  turnPhase: TurnPhase;
+  turnPhaseStartedAt: number;
+  /** Only meaningful during DECIDING — a CPU's skill-scaled pause before it sets off. */
+  turnPhaseDurationMs: number | null;
   turnDeadlineAt: number | null;
-  cpuDecisionAt: number | null;
-  pendingCpuPick: CpuPickPlan | null;
+  pendingPickSlotId: number | null;
   lastPick: LastPick | null;
-  turnRevealUntil: number | null;
 }
 
 export interface CauldronChaosSession {
@@ -68,7 +84,7 @@ export interface CauldronChaosSession {
 export interface CauldronChaosInput {
   /** Set by main.ts the moment the human clicks a shelf bottle on their own turn; consumed (and
    * cleared back to null) the instant it's applied. */
-  pickedIngredientId: number | null;
+  pickedSlotId: number | null;
 }
 
 function shuffled<T>(items: T[]): T[] {
@@ -82,30 +98,46 @@ function shuffled<T>(items: T[]): T[] {
 
 function createRoundState(roundIndex: number): RoundState {
   const config = ROUND_CONFIGS[roundIndex]!;
-  const poolIds = shuffled(INGREDIENTS.map((i) => i.id)).slice(0, config.poolSize);
-  const calledIds = Array.from({ length: config.callListLength }, () => poolIds[Math.floor(Math.random() * poolIds.length)]!);
-  const remainingSafeIds = [...new Set(calledIds)];
+  const types = shuffled(INGREDIENTS.map((i) => i.id)).slice(0, config.distinctTypeCount);
+
+  const shelfSlots: ShelfSlot[] = [];
+  let nextSlotId = 0;
+  const copiesByType: Record<number, number> = {};
+  for (const typeId of types) {
+    const copies = 1 + Math.floor(Math.random() * config.maxCopiesPerType);
+    copiesByType[typeId] = copies;
+    for (let c = 0; c < copies; c++) shelfSlots.push({ slotId: nextSlotId++, typeId });
+  }
+
+  const calledIds = Array.from({ length: config.callListLength }, () => types[Math.floor(Math.random() * types.length)]!);
+  const remainingSafeCountByType: Record<number, number> = {};
+  for (const typeId of types) {
+    const calledCount = calledIds.filter((id) => id === typeId).length;
+    remainingSafeCountByType[typeId] = Math.min(calledCount, copiesByType[typeId] ?? 0);
+  }
+
   const startPlayer = roundIndex % PLAYER_COUNT;
   const turnOrder = Array.from({ length: PLAYER_COUNT }, (_, i) => (startPlayer + i) % PLAYER_COUNT);
+
   return {
     roundIndex,
     config,
-    poolIds,
+    shelfSlots,
     calledIds,
-    remainingSafeIds,
-    usedIds: [],
+    remainingSafeCountByType,
+    usedSlotIds: [],
     turnOrder,
     turnPointer: 0,
     activePlayers: new Array(PLAYER_COUNT).fill(true),
     eliminatedOrder: [],
-    survivor: null,
+    survivors: [],
     scoresAwarded: null,
-    turnSubPhase: "AWAITING",
+    turnPhase: "AWAITING",
+    turnPhaseStartedAt: 0,
+    turnPhaseDurationMs: null,
     turnDeadlineAt: null,
-    cpuDecisionAt: null,
-    pendingCpuPick: null,
+    pendingPickSlotId: null,
     lastPick: null,
-    turnRevealUntil: null,
   };
 }
 
@@ -133,7 +165,7 @@ export function currentTurnPlayerId(round: RoundState): number {
 export function isHumanTurnAwaitingInput(session: CauldronChaosSession): boolean {
   return (
     session.phase === "PICKING" &&
-    session.round.turnSubPhase === "AWAITING" &&
+    session.round.turnPhase === "AWAITING" &&
     currentTurnPlayerId(session.round) === 0 &&
     !session.identities[0]!.isBot
   );
@@ -141,48 +173,55 @@ export function isHumanTurnAwaitingInput(session: CauldronChaosSession): boolean
 
 function beginTurn(session: CauldronChaosSession, now: number): void {
   const round = session.round;
-  round.turnSubPhase = "AWAITING";
   round.lastPick = null;
+  round.pendingPickSlotId = null;
   const playerId = currentTurnPlayerId(round);
   const identity = session.identities[playerId]!;
   if (identity.isBot) {
-    const plan = decideCpuPick(session.cpuSkills[playerId]!, round.remainingSafeIds, round.poolIds);
-    round.pendingCpuPick = plan;
-    round.cpuDecisionAt = now + plan.thinkMs;
+    const plan: CpuPickPlan = decideCpuPick(session.cpuSkills[playerId]!, round.shelfSlots, round.usedSlotIds, round.remainingSafeCountByType);
+    round.pendingPickSlotId = plan.slotId;
+    round.turnPhase = "DECIDING";
+    round.turnPhaseStartedAt = now;
+    round.turnPhaseDurationMs = plan.decideMs;
     round.turnDeadlineAt = null;
   } else {
-    round.pendingCpuPick = null;
-    round.cpuDecisionAt = null;
+    round.turnPhase = "AWAITING";
+    round.turnPhaseStartedAt = now;
+    round.turnPhaseDurationMs = null;
     round.turnDeadlineAt = now + HUMAN_TURN_TIMEOUT_MS;
   }
 }
 
-function resolvePick(session: CauldronChaosSession, playerId: number, ingredientId: number, now: number): void {
+function resolvePick(session: CauldronChaosSession): void {
   const round = session.round;
-  const safeIdx = round.remainingSafeIds.indexOf(ingredientId);
-  const safe = safeIdx !== -1;
+  const playerId = currentTurnPlayerId(round);
+  const slotId = round.pendingPickSlotId!;
+  const slot = round.shelfSlots.find((s) => s.slotId === slotId)!;
+  const typeId = slot.typeId;
+  const safe = (round.remainingSafeCountByType[typeId] ?? 0) > 0;
   if (safe) {
-    round.remainingSafeIds.splice(safeIdx, 1);
-    round.usedIds.push(ingredientId);
+    round.remainingSafeCountByType[typeId] = round.remainingSafeCountByType[typeId]! - 1;
+    round.usedSlotIds.push(slotId);
   } else {
     round.activePlayers[playerId] = false;
     round.eliminatedOrder.push(playerId);
   }
-  round.lastPick = { playerId, ingredientId, safe };
-  round.turnSubPhase = "REVEAL";
-  round.turnRevealUntil = now + TURN_REVEAL_HOLD_MS;
-  session.turnResolvedThisTick = { playerId, ingredientId, safe };
+  const lastPick: LastPick = { playerId, slotId, typeId, safe };
+  round.lastPick = lastPick;
+  session.turnResolvedThisTick = lastPick;
 }
 
-/** Ranks the survivor first, then eliminated players by how long they lasted (most recently
- * eliminated = 2nd place, earliest eliminated = last) — same points-by-rank convention as the
- * rest of the suite. */
+/** Every still-active player shares full survivor credit (normally just one, once the round has
+ * narrowed to a single player left — but see advanceAfterTurn's other end condition, where the
+ * shelf's physical supply runs out first and more than one player can tie for it). Eliminated
+ * players are then ranked by how long they lasted, using whatever point tiers are left — same
+ * points-by-rank convention as the rest of the suite. */
 function finishRound(session: CauldronChaosSession, now: number): void {
   const round = session.round;
-  const ranking = [round.survivor!, ...[...round.eliminatedOrder].reverse()];
   const scores = new Array(PLAYER_COUNT).fill(0);
-  ranking.forEach((playerId, rank) => {
-    scores[playerId] = POINTS_BY_SURVIVAL_RANK[rank] ?? 0;
+  for (const playerId of round.survivors) scores[playerId] = POINTS_BY_SURVIVAL_RANK[0] ?? 0;
+  [...round.eliminatedOrder].reverse().forEach((playerId, i) => {
+    scores[playerId] = POINTS_BY_SURVIVAL_RANK[i + 1] ?? 0;
   });
   round.scoresAwarded = scores;
   scores.forEach((pts, playerId) => {
@@ -193,11 +232,12 @@ function finishRound(session: CauldronChaosSession, now: number): void {
   session.roundScoredThisTick = true;
 }
 
-function advanceAfterReveal(session: CauldronChaosSession, now: number): void {
+function advanceAfterTurn(session: CauldronChaosSession, now: number): void {
   const round = session.round;
   const activeCount = round.activePlayers.filter(Boolean).length;
-  if (activeCount <= 1) {
-    round.survivor = round.activePlayers.findIndex(Boolean);
+  const shelfExhausted = round.shelfSlots.every((s) => round.usedSlotIds.includes(s.slotId));
+  if (activeCount <= 1 || shelfExhausted) {
+    round.survivors = round.activePlayers.flatMap((active, playerId) => (active ? [playerId] : []));
     finishRound(session, now);
     return;
   }
@@ -211,23 +251,60 @@ function advanceAfterReveal(session: CauldronChaosSession, now: number): void {
 
 function updatePicking(session: CauldronChaosSession, now: number, input: CauldronChaosInput): void {
   const round = session.round;
-  if (round.turnSubPhase === "AWAITING") {
-    const playerId = currentTurnPlayerId(round);
-    const identity = session.identities[playerId]!;
-    let pickedId: number | null = null;
-    if (identity.isBot) {
-      if (round.cpuDecisionAt !== null && now >= round.cpuDecisionAt) {
-        pickedId = round.pendingCpuPick!.ingredientId;
+  switch (round.turnPhase) {
+    case "AWAITING": {
+      let slotId: number | null = null;
+      if (input.pickedSlotId !== null) {
+        slotId = input.pickedSlotId;
+      } else if (round.turnDeadlineAt !== null && now >= round.turnDeadlineAt) {
+        const available = round.shelfSlots.filter((s) => !round.usedSlotIds.includes(s.slotId));
+        const pool = available.length > 0 ? available : round.shelfSlots;
+        slotId = pool[Math.floor(Math.random() * pool.length)]!.slotId;
       }
-    } else if (input.pickedIngredientId !== null) {
-      pickedId = input.pickedIngredientId;
-    } else if (round.turnDeadlineAt !== null && now >= round.turnDeadlineAt) {
-      pickedId = round.poolIds[Math.floor(Math.random() * round.poolIds.length)]!; // timed out — forced grab
+      if (slotId !== null) {
+        round.pendingPickSlotId = slotId;
+        round.turnPhase = "WALK_TO_SHELF";
+        round.turnPhaseStartedAt = now;
+      }
+      return;
     }
-    if (pickedId !== null) resolvePick(session, playerId, pickedId, now);
-    return;
+    case "DECIDING":
+      if (round.turnPhaseDurationMs !== null && now - round.turnPhaseStartedAt >= round.turnPhaseDurationMs) {
+        round.turnPhase = "WALK_TO_SHELF";
+        round.turnPhaseStartedAt = now;
+      }
+      return;
+    case "WALK_TO_SHELF":
+      if (now - round.turnPhaseStartedAt >= WALK_DURATION_MS) {
+        round.turnPhase = "PICKUP";
+        round.turnPhaseStartedAt = now;
+      }
+      return;
+    case "PICKUP":
+      if (now - round.turnPhaseStartedAt >= PICKUP_HOLD_MS) {
+        round.turnPhase = "WALK_TO_CAULDRON";
+        round.turnPhaseStartedAt = now;
+      }
+      return;
+    case "WALK_TO_CAULDRON":
+      if (now - round.turnPhaseStartedAt >= WALK_DURATION_MS) {
+        resolvePick(session);
+        round.turnPhase = "POUR";
+        round.turnPhaseStartedAt = now;
+      }
+      return;
+    case "POUR":
+      if (now - round.turnPhaseStartedAt >= POUR_HOLD_MS) {
+        round.turnPhase = "WALK_BACK";
+        round.turnPhaseStartedAt = now;
+      }
+      return;
+    case "WALK_BACK":
+      if (now - round.turnPhaseStartedAt >= WALK_DURATION_MS) {
+        advanceAfterTurn(session, now);
+      }
+      return;
   }
-  if (round.turnRevealUntil !== null && now >= round.turnRevealUntil) advanceAfterReveal(session, now);
 }
 
 export function updateCauldronChaosSession(session: CauldronChaosSession, now: number, input: CauldronChaosInput): void {

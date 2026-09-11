@@ -11,15 +11,17 @@
       <div id="hud"></div>
       <div class="sceneWrap">
         <canvas id="cauldronScene" width="1400" height="1000"></canvas>
+        <div id="banner" hidden></div>
       </div>
 
       <div id="setupPanel">
         <p class="settingsHint">
-          5 rounds. Each round the witch rattles off a list of potion ingredients — fast, and it
-          only gets faster. Then, taking turns, pour a bottle from the shelf into the cauldron.
-          Pour something that was on her list (and not already used) and you're safe. Pour wrong,
-          or repeat one already used, and it backfires — you're out for the round. Last one still
-          brewing scores the most.
+          5 rounds. Each round the cauldron flashes a list of potion ingredients — fast, and it
+          only gets faster. Then, taking turns, walk to the shelf, pick up a bottle, and carry it
+          to the cauldron. The same potion can sit on the shelf more than once — pour a copy of
+          something that was on the list and it's safe, as long as a copy is still left. Pour
+          wrong, or once every copy's been used, and it backfires — you're out for the round. Last
+          one still brewing scores the most.
         </p>
         <div class="settingsRow">
           <input id="playerNameInput" type="text" maxlength="12" placeholder="You" />
