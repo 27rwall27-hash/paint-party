@@ -7,7 +7,7 @@ import {
   updateCauldronChaosSession,
   type CauldronChaosSession,
 } from "./CauldronChaosSession.ts";
-import { pickShelfSlot } from "./raycast.ts";
+import { pickShelfType } from "./raycast.ts";
 import { createSceneContext, renderCauldronScene, type SceneContext } from "./sceneBuilder.ts";
 import * as sound from "./sound.ts";
 import { initSetupUI } from "./setupUI.ts";
@@ -38,8 +38,8 @@ canvas.addEventListener("pointermove", (e) => {
 });
 canvas.addEventListener("pointerdown", () => {
   if (!session || !sceneCtx || !isHumanTurnAwaitingInput(session)) return;
-  const slotId = pickShelfSlot(sceneCtx, mouseNormalized);
-  if (slotId !== null) pendingPick = slotId;
+  const typeId = pickShelfType(sceneCtx, mouseNormalized);
+  if (typeId !== null) pendingPick = typeId;
 });
 
 startBtn.addEventListener("click", () => {
@@ -98,7 +98,7 @@ function updateBanner(s: CauldronChaosSession, now: number): void {
 
 function loop(time: number): void {
   if (session && sceneCtx) {
-    updateCauldronChaosSession(session, time, { pickedSlotId: pendingPick });
+    updateCauldronChaosSession(session, time, { pickedTypeId: pendingPick });
     pendingPick = null;
 
     if (session.callItemRevealedThisTick) sound.playCallBlip(session.callItemRevealedThisTick.ingredientId);

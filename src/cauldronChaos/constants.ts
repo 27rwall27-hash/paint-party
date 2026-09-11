@@ -15,54 +15,43 @@ export const PRESET_COLORS: string[] = [
 export const CPU_NAME_PREFIX = "CPU";
 
 // --- Ingredients -----------------------------------------------------------------------------
-// A master pool of original potion ingredients — each round draws a random subset of these (no
-// two rounds necessarily look the same). Everything is procedurally drawn (see bottleTexture.ts's
-// glyph functions), no image assets.
-export type Glyph = "flame" | "moon" | "cap" | "snowflake" | "skull" | "berry" | "leaf" | "star" | "feather" | "drop" | "thorn" | "spiral" | "sparkle" | "swirl";
-
+// Exactly 10 potions, every round, each a maximally distinct hue — no symbols, the color alone is
+// the thing to remember. Names are kept for the call banner/flavor only.
 export interface IngredientDef {
   id: number;
   name: string;
   color: string;
-  glyph: Glyph;
 }
 
 export const INGREDIENTS: IngredientDef[] = [
-  { id: 0, name: "Ember Root", color: "#e2572b", glyph: "flame" },
-  { id: 1, name: "Moon Petal", color: "#9fb8e8", glyph: "moon" },
-  { id: 2, name: "Glowcap", color: "#8fd14f", glyph: "cap" },
-  { id: 3, name: "Frostvine", color: "#7fe3e0", glyph: "snowflake" },
-  { id: 4, name: "Shadow Ash", color: "#6b4b8a", glyph: "skull" },
-  { id: 5, name: "Sunberry", color: "#f4c53d", glyph: "berry" },
-  { id: 6, name: "Bog Moss", color: "#5c7a3f", glyph: "leaf" },
-  { id: 7, name: "Starshard", color: "#e8e8f0", glyph: "star" },
-  { id: 8, name: "Crow Feather", color: "#3a3542", glyph: "feather" },
-  { id: 9, name: "Honeydrop", color: "#e0a339", glyph: "drop" },
-  { id: 10, name: "Thornbrier", color: "#a13a4a", glyph: "thorn" },
-  { id: 11, name: "Swirlkelp", color: "#2f9e8f", glyph: "spiral" },
-  { id: 12, name: "Cinderdust", color: "#8a7d6b", glyph: "sparkle" },
-  { id: 13, name: "Wisproot", color: "#8a5ec9", glyph: "swirl" },
+  { id: 0, name: "Ember Root", color: "#e63946" }, // red
+  { id: 1, name: "Moon Petal", color: "#3a86ff" }, // blue
+  { id: 2, name: "Glowcap", color: "#ffd60a" }, // yellow
+  { id: 3, name: "Bog Moss", color: "#2ecc71" }, // green
+  { id: 4, name: "Shadow Ash", color: "#8e44ad" }, // purple
+  { id: 5, name: "Sunberry", color: "#f77f00" }, // orange
+  { id: 6, name: "Frostvine", color: "#06b6d4" }, // cyan
+  { id: 7, name: "Wisproot", color: "#e0479e" }, // magenta
+  { id: 8, name: "Starshard", color: "#e8e8f0" }, // white
+  { id: 9, name: "Cinderdust", color: "#8a5a34" }, // brown
 ];
 
 // --- Rounds -------------------------------------------------------------------------------
-// Each round picks `distinctTypeCount` random ingredient types; each gets a random number of
-// physical bottle copies on the shelf (1..maxCopiesPerType) — the SAME potion can sit on the
-// shelf more than once, and can be safely poured once per physical copy. The witch's (now the
-// cauldron's own) called list is drawn from those distinct types with replacement; how many
-// times a type is called determines how many of its physical copies are safe to pour, capped by
-// however many copies actually exist.
+// The shelf always shows all 10 potions, and the cauldron's vision always calls out 12 of them
+// (with replacement, so some repeat — that's what lets a color be safely poured more than once).
+// Every bottle taken off the shelf refills immediately, so the shelf itself never runs dry; only
+// the call-count bookkeeping decides whether a given pour is actually safe. Difficulty ramps
+// purely through the call speed getting faster round to round.
 export interface RoundConfig {
-  distinctTypeCount: number;
-  maxCopiesPerType: number;
   callListLength: number;
   callIntervalMs: number;
 }
 export const ROUND_CONFIGS: RoundConfig[] = [
-  { distinctTypeCount: 5, maxCopiesPerType: 2, callListLength: 7, callIntervalMs: 650 },
-  { distinctTypeCount: 6, maxCopiesPerType: 2, callListLength: 8, callIntervalMs: 550 },
-  { distinctTypeCount: 6, maxCopiesPerType: 3, callListLength: 10, callIntervalMs: 450 },
-  { distinctTypeCount: 7, maxCopiesPerType: 3, callListLength: 11, callIntervalMs: 380 },
-  { distinctTypeCount: 8, maxCopiesPerType: 3, callListLength: 13, callIntervalMs: 300 },
+  { callListLength: 12, callIntervalMs: 700 },
+  { callListLength: 12, callIntervalMs: 580 },
+  { callListLength: 12, callIntervalMs: 480 },
+  { callListLength: 12, callIntervalMs: 400 },
+  { callListLength: 12, callIntervalMs: 320 },
 ];
 
 // Survivor (last one un-eliminated) scores highest, then by how long each eliminated player
@@ -79,7 +68,7 @@ export const SCORED_HOLD_MS = 2400;
 // --- Turn choreography (ms) -------------------------------------------------------------------
 // Every turn — human or CPU — is a real walk: to the shelf, pick up the chosen bottle, carry it
 // to the cauldron, pour (resolved here), then walk back. Exactly one player animates at a time.
-export const WALK_DURATION_MS = 1100;
+export const WALK_DURATION_MS = 1300;
 export const PICKUP_HOLD_MS = 350;
 export const POUR_HOLD_MS = 750;
 
@@ -100,30 +89,39 @@ export const WALL_HEIGHT = 6.5;
 
 export const SHELF_Z = -ROOM_DEPTH / 2 + 1.6;
 export const SHELF_Y = 1.15;
-export const SHELF_WIDTH = ROOM_WIDTH - 3;
+export const SHELF_WIDTH = ROOM_WIDTH - 4;
+// A character walks to (and stands at) a point this far in FRONT of the shelf counter to reach
+// for a bottle — not the bottle's own position, which sits on top of/inside the counter volume.
+export const SHELF_APPROACH_OFFSET = 1.5;
 
 export const CAULDRON_X = 0;
 export const CAULDRON_Z = -1.2;
-export const CAULDRON_RADIUS = 1.6;
+export const CAULDRON_RADIUS = 1.5;
 // Where a carried bottle gets poured — just south (camera-side) of the cauldron's own rim.
-export const CAULDRON_POUR_Z = CAULDRON_Z + CAULDRON_RADIUS + 0.9;
+export const CAULDRON_POUR_Z = CAULDRON_Z + CAULDRON_RADIUS + 1.0;
+// How far out (world X, at the cauldron's own Z) a walking path bows around the cauldron's own
+// footprint — every leg of a turn's walk routes via this detour point instead of a straight line,
+// so nobody ever cuts straight through the pot.
+export const CAULDRON_DETOUR_MARGIN = CAULDRON_RADIUS + 2.1;
 
 export const PLAYER_HOME_POSITIONS: { x: number; z: number }[] = [
-  { x: -3.4, z: 5.6 },
-  { x: 3.4, z: 5.6 },
-  { x: -7.2, z: 2.4 },
-  { x: 7.2, z: 2.4 },
+  { x: -3.4, z: 6.4 },
+  { x: 3.4, z: 6.4 },
+  { x: -7.6, z: 3.6 },
+  { x: 7.6, z: 3.6 },
 ];
 
 export const BOTTLE_RADIUS = 0.32;
 export const BOTTLE_HEIGHT = 0.85;
 export const CHARACTER_RADIUS = 0.42;
-export const CHARACTER_HEIGHT = 1.55;
+export const CHARACTER_HEIGHT = 1.6;
+export const WALK_CYCLE_PERIOD_MS = 260;
+export const WALK_SWING_RAD = 0.6;
 
-export const CAMERA_FOV = 44;
-export const CAMERA_HEIGHT = 11.5;
-export const CAMERA_BACK = 12.5;
+export const CAMERA_FOV = 42;
+export const CAMERA_HEIGHT = 12.5;
+export const CAMERA_BACK = 14;
 export const AMBIENT_LIGHT_INTENSITY = 1.3;
-export const KEY_LIGHT_INTENSITY = 2.1;
-export const ENVIRONMENT_INTENSITY = 0.6;
+export const KEY_LIGHT_INTENSITY = 2.2;
+export const ENVIRONMENT_INTENSITY = 0.55;
 export const SHADOWS_ENABLED = true;
