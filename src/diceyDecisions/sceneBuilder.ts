@@ -8,6 +8,7 @@ import {
   CANVAS_W,
   DIVIDER_HEIGHT,
   DIVIDER_THICKNESS,
+  ENVIRONMENT_INTENSITY,
   FELT_COLOR,
   FELT_COLOR_HOVER,
   FLOOR_DEPTH,
@@ -91,6 +92,56 @@ function createBackgroundTexture(): THREE.CanvasTexture {
   return texture;
 }
 
+/** A glossy clearcoat only picks up a tiny hotspot from a single directional light — without
+ * something to actually reflect, "shiny" reads as flat. This builds a small equirectangular
+ * "studio" environment and prefilters it via PMREMGenerator into scene.environment, so every
+ * clearcoat/PBR surface in the box gets real reflections instead of one thin glint. A dark base
+ * (for contrast) plus a few small, near-white, tightly-bounded "window" highlights — not broad
+ * soft glows — is what actually reads as high-gloss lacquer rather than a satin sheen. */
+function createEnvironmentTexture(): THREE.Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  sky.addColorStop(0, "#4a3f52");
+  sky.addColorStop(0.45, "#2c2436");
+  sky.addColorStop(1, "#0a0712");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (const [x, y, r, alpha] of [
+    [140, 40, 22, 1],
+    [360, 60, 16, 1],
+    [256, 20, 30, 1],
+    [70, 130, 12, 0.9],
+    [430, 150, 14, 0.9],
+  ] as const) {
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, r);
+    glow.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    glow.addColorStop(0.5, `rgba(255,242,222,${alpha * 0.55})`);
+    glow.addColorStop(1, "rgba(255,242,222,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createEnvironmentMap(renderer: THREE.WebGLRenderer): THREE.Texture {
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  const equirect = createEnvironmentTexture();
+  const renderTarget = pmremGenerator.fromEquirectangular(equirect);
+  equirect.dispose();
+  pmremGenerator.dispose();
+  return renderTarget.texture;
+}
+
 function buildStaticBox(boxRoot: THREE.Group): void {
   const base = new THREE.Mesh(
     new THREE.BoxGeometry(FLOOR_WIDTH + WALL_THICKNESS * 2, FLOOR_THICKNESS, FLOOR_DEPTH + WALL_THICKNESS * 2),
@@ -160,6 +211,8 @@ export function createSceneContext(canvas: HTMLCanvasElement, session: DiceyDeci
 
   const scene = new THREE.Scene();
   scene.background = createBackgroundTexture();
+  scene.environment = createEnvironmentMap(renderer);
+  scene.environmentIntensity = ENVIRONMENT_INTENSITY;
 
   const camera = new THREE.PerspectiveCamera(CAMERA_FOV, CANVAS_W / CANVAS_H, 0.1, 100);
   camera.position.set(0, CAMERA_HEIGHT, CAMERA_BACK);

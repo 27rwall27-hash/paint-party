@@ -136,5 +136,10 @@ export const PEG_HOLE_MARGIN_FRACTION = 0.18; // inset from each section's own e
 export const CAMERA_FOV = 38;
 export const CAMERA_HEIGHT = 22;
 export const CAMERA_BACK = 9; // offset behind box center, for a "near top-down" angle with real depth
-export const AMBIENT_LIGHT_INTENSITY = 2.2;
-export const KEY_LIGHT_INTENSITY = 2.6;
+// Lowered from the pre-environment-map pass (2.2/2.6) — scene.environment (see sceneBuilder.ts's
+// createEnvironmentMap) now contributes real fill/gleam light of its own, so the direct lights no
+// longer need to carry the whole scene alone; without this cut the two together overexposed the
+// wood back toward pale/pink.
+export const AMBIENT_LIGHT_INTENSITY = 1.1;
+export const KEY_LIGHT_INTENSITY = 2.0;
+export const ENVIRONMENT_INTENSITY = 1.1;
