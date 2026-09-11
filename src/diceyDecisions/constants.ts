@@ -40,26 +40,24 @@ export const POINTS_BY_RANK: number[] = [5, 3, 2, 1];
 // --- Round phase timing (ms) ----------------------------------------------------------------
 export const BOX_CLOSED_HOLD_MS = 1200;
 export const LID_OPEN_DURATION_MS = 900;
-// Generous but bounded — a round always ends even if someone never commits to an answer.
-export const PLAYING_TIMEOUT_MS = 12_000;
+// Generous but bounded — a round always ends even if someone never commits to an answer. Must
+// comfortably clear the slowest possible CPU reaction (REACTION_SLOW_MS * (1+REACTION_JITTER)
+// below) with room to spare for a human still counting pips on a dense round.
+export const PLAYING_TIMEOUT_MS = 16_000;
 export const SCORED_HOLD_MS = 2200;
 export const LID_CLOSE_DURATION_MS = 800;
-
-// --- Reticle ---------------------------------------------------------------------------------
-// Normalized canvas-space units per second — held WASD keys combine into a (diagonal-normalized)
-// vector, same convention as Light Maze's applyHumanMovement, just in [0,1] screen space instead
-// of room-units, since the reticle needs to survive a canvas resize without knowing live pixels.
-export const RETICLE_SPEED = 1.1;
 
 // --- CPU pacing --------------------------------------------------------------------------------
 // Each CPU rolls a persistent 0..1 "skill" once at game start (same convention as every other
 // game's rollCpuSkill) that governs both how fast AND how accurately it answers. Unlike Light
 // Maze's CPUs (which re-decide every tick while navigating), a Dicey Decisions CPU only ever
-// makes ONE decision per round — computed the instant that round enters PLAYING.
-export const REACTION_SLOW_MS = 4500;
-export const REACTION_FAST_MS = 900;
+// makes ONE decision per round — computed the instant that round enters PLAYING. Slowed down
+// from the first pass (900-4500ms) — CPUs were winning before a human could even finish scanning
+// the board, which isn't a fair race.
+export const REACTION_SLOW_MS = 9000;
+export const REACTION_FAST_MS = 3500;
 export const REACTION_JITTER = 0.3; // +/- fraction, so the same CPU doesn't answer on a metronome
-export const MIN_REACTION_MS = 400;
+export const MIN_REACTION_MS = 1800;
 // Never 100% even at max skill — a "better" CPU is faster AND more accurate, but can still blink.
 export const ACCURACY_MIN = 0.5;
 export const ACCURACY_MAX = 0.92;
@@ -70,7 +68,6 @@ export const MAX_REROLL_ITERATIONS = 200;
 // --- Scene geometry (world units — DIE_SIZE = 1 is the base unit everything else is scaled
 // against) --------------------------------------------------------------------------------------
 export const DIE_SIZE = 1;
-export const DIE_TILT_MAX_RAD = 0.35; // ~20°, "just settled" wobble, not perfectly flat
 export const PLACEMENT_JITTER_FRACTION = 0.7; // fraction of each slot's own remaining slack
 export const OVERLAP_SAFETY_MARGIN = 1.18; // dice shrink (never grow) if a slot would be tighter than this
 

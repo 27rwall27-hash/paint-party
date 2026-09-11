@@ -224,7 +224,7 @@ function rebuildDice(ctx: SceneContext, session: DiceyDecisionsSession): void {
     const mesh = new THREE.Mesh(geometry, materials);
     mesh.scale.setScalar(placement.scale);
     mesh.position.set(box.cx + placement.localX, (0.94 * placement.scale) / 2 + 0.02, box.cz + placement.localZ);
-    applyDiePlacementRotation(mesh, placement.topFace, placement.yaw, placement.tiltAxisAngle, placement.tiltAmount);
+    applyDiePlacementRotation(mesh, placement.topFace, placement.yaw);
     mesh.castShadow = SHADOWS_ENABLED;
     mesh.receiveShadow = true;
     ctx.diceGroup.add(mesh);

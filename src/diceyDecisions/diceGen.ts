@@ -1,4 +1,4 @@
-import { DIE_SIZE, DIE_TILT_MAX_RAD, MAX_REROLL_ITERATIONS, OVERLAP_SAFETY_MARGIN, PLACEMENT_JITTER_FRACTION, type RoundConfig } from "./constants.ts";
+import { DIE_SIZE, MAX_REROLL_ITERATIONS, OVERLAP_SAFETY_MARGIN, PLACEMENT_JITTER_FRACTION, type RoundConfig } from "./constants.ts";
 import { sectionBounds, type SectionBounds } from "./layout.ts";
 
 export type PipCount = 1 | 2 | 3 | 4 | 5 | 6;
@@ -14,12 +14,9 @@ export interface DiePlacement {
   topFace: PipCount;
   localX: number;
   localZ: number;
-  /** Spin around the world-vertical axis — full random, doesn't disturb which face is up. */
+  /** Spin around the world-vertical axis — full random, doesn't disturb which face is up. Dice
+   * are placed perfectly flat (no tilt) so the top face stays clearly readable. */
   yaw: number;
-  /** Direction (around Y) of the small "just settled" tilt. */
-  tiltAxisAngle: number;
-  /** Magnitude of that tilt, in radians. */
-  tiltAmount: number;
   /** Uniform per-die shrink, <= 1 — only shrinks under density (see generateDicePlacements). */
   scale: number;
 }
@@ -149,8 +146,6 @@ export function generateDicePlacements(sections: SectionData[]): DiePlacement[] 
         localX: slot.cx + (Math.random() * 2 - 1) * jitterX,
         localZ: slot.cz + (Math.random() * 2 - 1) * jitterZ,
         yaw: Math.random() * Math.PI * 2,
-        tiltAxisAngle: Math.random() * Math.PI * 2,
-        tiltAmount: Math.random() * DIE_TILT_MAX_RAD,
         scale,
       });
     });

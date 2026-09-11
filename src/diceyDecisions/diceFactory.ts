@@ -99,13 +99,10 @@ const BASE_ROTATION_FOR_TOP_FACE: Record<PipCount, THREE.Euler> = {
 /** Composition order matters: the base rotation (which face is up) is applied first/innermost,
  * then the yaw spin around the WORLD vertical axis (not the object's own local Y, which no longer
  * coincides with world Y after the base rotation) so the spin can never change which face is up.
- * A small extra tilt around a random horizontal axis is applied last, on top of everything, for
- * the "just settled, not perfectly flat" wobble. */
-export function applyDiePlacementRotation(mesh: THREE.Object3D, topFace: PipCount, yaw: number, tiltAxisAngle: number, tiltAmount: number): void {
+ * No extra tilt is applied — dice sit perfectly flat on the felt so the top face stays fully
+ * readable at the game's near-top-down camera angle. */
+export function applyDiePlacementRotation(mesh: THREE.Object3D, topFace: PipCount, yaw: number): void {
   const qBase = new THREE.Quaternion().setFromEuler(BASE_ROTATION_FOR_TOP_FACE[topFace]);
   const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
   mesh.quaternion.multiplyQuaternions(qYaw, qBase);
-  const tiltAxis = new THREE.Vector3(Math.cos(tiltAxisAngle), 0, Math.sin(tiltAxisAngle));
-  const qTilt = new THREE.Quaternion().setFromAxisAngle(tiltAxis, tiltAmount);
-  mesh.quaternion.premultiply(qTilt);
 }

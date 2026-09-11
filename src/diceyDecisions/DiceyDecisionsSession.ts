@@ -11,7 +11,6 @@ import {
   PLAYER_COUNT,
   PLAYING_TIMEOUT_MS,
   POINTS_BY_RANK,
-  RETICLE_SPEED,
   ROUND_CONFIGS,
   SCORED_HOLD_MS,
   type RoundConfig,
@@ -48,15 +47,9 @@ export interface DiceyDecisionsSession {
   round: RoundState;
   phase: DiceyDecisionsPhase;
   phaseStartedAt: number;
-  /** Real timestamp of the last updateDiceyDecisionsSession call — lets the reticle move in real
-   * normalized-units-per-second regardless of the caller's own frame timing. */
-  lastUpdateAt: number;
-  /** Normalized [0,1] canvas-space — survives a canvas resize without needing live pixel
-   * dimensions. Gameplay state (determines what a click selects), so it lives here, not in the
-   * render layer — moved the same way Light Maze moves a player's room position. */
-  humanReticle: { x: number; y: number };
-  /** Fed in fresh each tick by main.ts (a raycast against last frame's reticle position — see
-   * raycast.ts) and just stored here for the render layer to read back for the hover highlight. */
+  /** Fed in fresh each tick by main.ts — a raycast (see raycast.ts) against the mouse's current
+   * position over the canvas, one frame of lag behind the real cursor (imperceptible at 60fps).
+   * Stored here so the render layer can read it back for the hover highlight. */
   humanHoveredSection: number | null;
   cpuPlans: (CpuDiceyPlan | null)[]; // index = playerId, regenerated every round on PLAYING entry
   // Edge-triggered, cleared at the start of every tick — main.ts reads these after each
@@ -68,11 +61,7 @@ export interface DiceyDecisionsSession {
 }
 
 export interface DiceyDecisionsInput {
-  up: boolean;
-  down: boolean;
-  left: boolean;
-  right: boolean;
-  /** Raycast result from the PREVIOUS frame's reticle position — one frame of lag, imperceptible
+  /** Raycast result from the PREVIOUS frame's mouse position — one frame of lag, imperceptible
    * at 60fps, keeps this session fully `three`-free (it only ever sees a plain number). */
   hoveredSection: number | null;
   clicked: boolean;
@@ -104,8 +93,6 @@ export function createDiceyDecisionsSession(identities: PlayerIdentity[], now: n
     round: createRoundState(0),
     phase: "BOX_CLOSED",
     phaseStartedAt: now,
-    lastUpdateAt: now,
-    humanReticle: { x: 0.5, y: 0.5 },
     humanHoveredSection: null,
     cpuPlans: new Array(PLAYER_COUNT).fill(null),
     lidOpenedThisTick: false,
@@ -113,21 +100,6 @@ export function createDiceyDecisionsSession(identities: PlayerIdentity[], now: n
     selectionsThisTick: [],
     roundScoredThisTick: false,
   };
-}
-
-function clamp01(v: number): number {
-  return Math.min(1, Math.max(0, v));
-}
-
-function moveReticle(reticle: { x: number; y: number }, input: DiceyDecisionsInput, dt: number): void {
-  let dx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-  let dy = (input.down ? 1 : 0) - (input.up ? 1 : 0);
-  if (dx !== 0 && dy !== 0) {
-    dx *= Math.SQRT1_2;
-    dy *= Math.SQRT1_2;
-  }
-  reticle.x = clamp01(reticle.x + dx * RETICLE_SPEED * dt);
-  reticle.y = clamp01(reticle.y + dy * RETICLE_SPEED * dt);
 }
 
 function lockSelection(session: DiceyDecisionsSession, playerId: number, section: number, now: number): void {
@@ -151,9 +123,6 @@ export function computeRoundScores(round: RoundState): number[] {
 }
 
 export function updateDiceyDecisionsSession(session: DiceyDecisionsSession, now: number, input: DiceyDecisionsInput): void {
-  const dt = Math.min(0.05, Math.max(0, (now - session.lastUpdateAt) / 1000));
-  session.lastUpdateAt = now;
-
   session.lidOpenedThisTick = false;
   session.lidClosedThisTick = false;
   session.selectionsThisTick = [];
@@ -185,8 +154,6 @@ export function updateDiceyDecisionsSession(session: DiceyDecisionsSession, now:
       return;
 
     case "PLAYING": {
-      moveReticle(session.humanReticle, input, dt);
-
       const human = session.round.selections[0]!;
       if (input.clicked && input.hoveredSection !== null && human.section === null) {
         lockSelection(session, 0, input.hoveredSection, now);
