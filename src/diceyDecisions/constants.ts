@@ -84,6 +84,9 @@ export const MAX_REROLL_ITERATIONS = 200;
 export const DIE_SIZE = 1;
 export const PLACEMENT_JITTER_FRACTION = 0.7; // fraction of each slot's own remaining slack
 export const OVERLAP_SAFETY_MARGIN = 1.18; // dice shrink (never grow) if a slot would be tighter than this
+// Inset from a section's own edges (where the walls/dividers are) that dice placement never uses
+// — keeps every die a visible gap clear of the walls regardless of round density.
+export const DICE_WALL_MARGIN = 0.9;
 
 export const FLOOR_WIDTH = 16;
 export const FLOOR_DEPTH = 11;
@@ -97,31 +100,35 @@ export const LID_OPEN_ANGLE_RAD = Math.PI * 0.62; // past vertical, so it visual
 
 export const FELT_COLOR = 0x1f6b3a;
 export const FELT_COLOR_HOVER = 0x2a8a4d;
-// Deep rosewood — a dark, saturated red-brown, not the honey-oak of a first pass.
-export const WOOD_COLOR = 0x5e2029;
-export const WOOD_DARK_COLOR = 0x33141a;
+// Deep mahogany/rosewood — a dark, saturated red-brown. Kept well clear of pink: low lightness,
+// red channel meaningfully ahead of green/blue.
+export const WOOD_COLOR = 0x431912;
+export const WOOD_DARK_COLOR = 0x220c08;
 export const WINNING_EMISSIVE = 0xffd60a;
 
 // "Gleam" comes from MeshPhysicalMaterial's clearcoat layer (a glossy varnish coat on top of the
-// wood grain) rather than an environment map — see boxMaterials.ts.
-export const BOX_CLEARCOAT = 0.55;
-export const BOX_CLEARCOAT_ROUGHNESS = 0.2;
-export const BOX_ROUGHNESS = 0.42;
+// wood grain) rather than an environment map — see boxMaterials.ts. Pushed high for a genuinely
+// glossy, lacquered look.
+export const BOX_CLEARCOAT = 0.95;
+export const BOX_CLEARCOAT_ROUGHNESS = 0.045;
+export const BOX_ROUGHNESS = 0.3;
 
 export const SHADOWS_ENABLED = true;
 
-// --- Peg board (per-section selection markers) --------------------------------------------------
-// Each section has its own small peg board mounted on its north (far-from-camera) wall, with 4
-// holes spaced evenly across it. A player's peg slots into the hole matching how many players
-// picked that section before them (0 = far left = first).
-export const PEG_RADIUS = 0.13;
-export const PEG_LENGTH = 0.55;
-export const PEG_BOARD_HEIGHT = 0.4;
-export const PEG_BOARD_THICKNESS = 0.15;
-export const PEG_BOARD_Y_CENTER = 0.5;
-// Offset south (toward the section's own interior) from the exact grid boundary line, clear of
-// both the outer wall's interior face (flush at the boundary) and a divider's own half-thickness.
-export const PEG_BOARD_WALL_OFFSET = 0.22;
+// --- Peg wall (per-section selection markers) -----------------------------------------------
+// Every section gets its own small dedicated pedestal wall standing on the felt just south of its
+// north (far-from-camera) boundary — deliberately independent of whatever real wall/divider is at
+// that boundary, so every section's peg wall is identically sized regardless of whether that
+// boundary happens to be the outer box wall or a thinner interior divider. Holes are drilled
+// straight through its flat top; pegs stand up out of them (0 = far left = first to pick that
+// section).
+export const PEG_RADIUS = 0.12;
+export const PEG_LENGTH = 0.75;
+export const PEG_WALL_HEIGHT = 0.5;
+export const PEG_WALL_THICKNESS = 0.4;
+// Gap between the exact grid boundary line and this pedestal — purely cosmetic breathing room,
+// same for every section since the pedestal never actually touches the real wall/divider.
+export const PEG_WALL_GAP = 0.2;
 export const PEG_HOLE_RADIUS = 0.16;
 export const PEG_HOLE_MARGIN_FRACTION = 0.18; // inset from each section's own edges
 

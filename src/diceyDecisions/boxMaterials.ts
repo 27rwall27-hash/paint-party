@@ -1,16 +1,17 @@
 import * as THREE from "three";
 import { BOX_CLEARCOAT, BOX_CLEARCOAT_ROUGHNESS, BOX_ROUGHNESS, WOOD_COLOR, WOOD_DARK_COLOR } from "./constants.ts";
 
-const WOOD_LIGHT = "#8a4a52"; // a lighter rosewood tone, for grain highlight streaks
+const WOOD_LIGHT = "#6e3320"; // a lighter mahogany-brown, for grain highlight streaks — warm, not pink
 const BRASS = "#c9a227";
 
 function hexToCss(n: number): string {
   return `#${n.toString(16).padStart(6, "0")}`;
 }
 
-/** Procedural wood grain: a base rosewood fill plus many soft wavy streaks (some darker, some
- * lighter) and a couple of faint knots — no external texture assets, same "synthesize everything"
- * approach the rest of the suite already uses for sound. */
+/** Procedural wood grain: a base mahogany fill plus many soft wavy streaks (some darker, some
+ * lighter) — no external texture assets, same "synthesize everything" approach the rest of the
+ * suite already uses for sound. No knots/blotches: at this size they read as dirty spots rather
+ * than wood character, so grain stays to clean directional streaks only. */
 function drawWoodGrain(ctx: CanvasRenderingContext2D, width: number, height: number): void {
   ctx.fillStyle = hexToCss(WOOD_COLOR);
   ctx.fillRect(0, 0, width, height);
@@ -29,20 +30,6 @@ function drawWoodGrain(ctx: CanvasRenderingContext2D, width: number, height: num
     const cy2 = y + (Math.random() - 0.5) * height * 0.08;
     ctx.bezierCurveTo(cx1, cy1, cx2, cy2, width, y + (Math.random() - 0.5) * height * 0.05);
     ctx.stroke();
-  }
-
-  ctx.globalAlpha = 0.3;
-  for (let i = 0; i < 3; i++) {
-    const kx = Math.random() * width;
-    const ky = Math.random() * height;
-    const r = 8 + Math.random() * 12;
-    const grad = ctx.createRadialGradient(kx, ky, 0, kx, ky, r * 2.4);
-    grad.addColorStop(0, hexToCss(WOOD_DARK_COLOR));
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(kx, ky, r * 2.4, 0, Math.PI * 2);
-    ctx.fill();
   }
   ctx.globalAlpha = 1;
 }

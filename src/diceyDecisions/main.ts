@@ -7,7 +7,7 @@ import {
   type DiceyDecisionsSession,
 } from "./DiceyDecisionsSession.ts";
 import { pickSection } from "./raycast.ts";
-import { createSceneContext, renderDiceyScene, type SceneContext } from "./sceneBuilder.ts";
+import { createSceneContext, pegScreenPosition, renderDiceyScene, type SceneContext } from "./sceneBuilder.ts";
 import * as sound from "./sound.ts";
 import { initSetupUI } from "./setupUI.ts";
 
@@ -16,6 +16,7 @@ const setupPanel = document.querySelector<HTMLElement>("#setupPanel")!;
 const startBtn = document.querySelector<HTMLButtonElement>("#startBtn")!;
 const playAgainBtn = document.querySelector<HTMLButtonElement>("#playAgainBtn")!;
 const hud = document.querySelector<HTMLElement>("#hud")!;
+const scorePopups = document.querySelector<HTMLElement>("#scorePopups")!;
 
 const identities = createIdentities();
 initSetupUI(identities);
@@ -70,6 +71,26 @@ function updateHud(s: DiceyDecisionsSession): void {
   hud.textContent = `${roundLabel}   ${phaseLabel}   —   ${scores}`;
 }
 
+const SCORE_POPUP_MS = 1300;
+
+/** Same feel as Paint Party's own in-place "+N" reveal: pops in with a bounce, holds, then floats
+ * up while fading — here as a DOM overlay positioned over the peg that just scored, since this
+ * game's board is a 3D scene rather than a 2D canvas. Pure CSS keyframes drive the animation (see
+ * style.css's scorePopFloat); this just places one and lets it clean itself up. */
+function spawnScorePopup(xPct: number, yPct: number, points: number, color: string): void {
+  const anchor = document.createElement("div");
+  anchor.className = "scorePopupAnchor";
+  anchor.style.left = `${xPct}%`;
+  anchor.style.top = `${yPct}%`;
+  const text = document.createElement("div");
+  text.className = "scorePopupText";
+  text.textContent = `+${points}`;
+  text.style.color = color;
+  anchor.appendChild(text);
+  scorePopups.appendChild(anchor);
+  setTimeout(() => anchor.remove(), SCORE_POPUP_MS);
+}
+
 function loop(time: number): void {
   if (session && sceneCtx) {
     const hoveredSection = pickSection(sceneCtx, mouseNormalized);
@@ -79,13 +100,13 @@ function loop(time: number): void {
     if (session.lidOpenedThisTick) sound.playLidOpen();
     if (session.lidClosedThisTick) sound.playLidClose();
     if (session.shakingStartedThisTick) sound.playDiceShake(SHAKING_DURATION_MS);
-    for (const event of session.selectionsThisTick) {
-      if (event.playerId === 0) {
-        if (event.correct) sound.playCorrect(true);
-        else sound.playWrong();
-      } else {
-        sound.playSelectClick(false);
-      }
+    for (const event of session.selectionsThisTick) sound.playSelectClick(event.playerId === 0);
+    if (session.roundScoredThisTick && session.round.scoresAwarded) {
+      session.round.scoresAwarded.forEach((points, playerId) => {
+        if (points <= 0) return;
+        const pos = pegScreenPosition(sceneCtx!, playerId);
+        if (pos) spawnScorePopup(pos.xPct, pos.yPct, points, session!.identities[playerId]!.color);
+      });
     }
     if (session.phase === "RESULTS" && !wasResults) sound.playFanfare();
     wasResults = session.phase === "RESULTS";

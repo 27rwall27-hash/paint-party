@@ -67,6 +67,49 @@ body {
   cursor: pointer;
 }
 
+#scorePopups {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.scorePopupAnchor {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
+.scorePopupText {
+  font: 800 26px "Segoe UI", sans-serif;
+  white-space: nowrap;
+  -webkit-text-stroke: 3px rgba(20, 17, 24, 0.7);
+  paint-order: stroke fill;
+  animation: scorePopFloat 1300ms ease-out forwards;
+}
+
+@keyframes scorePopFloat {
+  0% {
+    opacity: 0;
+    transform: scale(0.7) translateY(0);
+  }
+  8% {
+    opacity: 1;
+    transform: scale(1.3) translateY(0);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  58% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.7) translateY(-70px);
+  }
+}
+
 #setupPanel {
   width: 100%;
   background: #241f29;

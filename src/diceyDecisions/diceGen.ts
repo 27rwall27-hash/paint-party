@@ -1,4 +1,4 @@
-import { DIE_SIZE, MAX_REROLL_ITERATIONS, OVERLAP_SAFETY_MARGIN, PLACEMENT_JITTER_FRACTION, type RoundConfig } from "./constants.ts";
+import { DICE_WALL_MARGIN, DIE_SIZE, MAX_REROLL_ITERATIONS, OVERLAP_SAFETY_MARGIN, PLACEMENT_JITTER_FRACTION, type RoundConfig } from "./constants.ts";
 import { sectionBounds, type SectionBounds } from "./layout.ts";
 
 export type PipCount = 1 | 2 | 3 | 4 | 5 | 6;
@@ -132,7 +132,11 @@ export function generateDicePlacements(sections: SectionData[]): DiePlacement[] 
   const placements: DiePlacement[] = [];
   for (const section of sections) {
     const box: SectionBounds = bounds[section.index]!;
-    const slots = slotGrid(section.diceValues.length, box.width, box.depth).slice(0, section.diceValues.length);
+    // Inset from the section's own edges (where the walls/dividers are) so no die ever spawns
+    // flush against a wall, regardless of round density.
+    const usableWidth = Math.max(DIE_SIZE, box.width - DICE_WALL_MARGIN * 2);
+    const usableDepth = Math.max(DIE_SIZE, box.depth - DICE_WALL_MARGIN * 2);
+    const slots = slotGrid(section.diceValues.length, usableWidth, usableDepth).slice(0, section.diceValues.length);
     const tightestSlot = slots.reduce((min, s) => Math.min(min, s.w, s.h), Infinity);
     const scale = Math.min(1, tightestSlot / (DIE_SIZE * OVERLAP_SAFETY_MARGIN));
 

@@ -115,31 +115,6 @@ export function playSelectClick(isHuman: boolean): void {
   tone(520, 0, 0.07, "square", peak);
 }
 
-/** A bright ascending chime — a CORRECT selection. */
-export function playCorrect(isHuman: boolean): void {
-  const peak = isHuman ? 0.3 : 0.09;
-  tone(660, 0, 0.12, "sine", peak);
-  tone(990, 0.07, 0.18, "sine", peak * 0.85);
-}
-
-/** A short descending buzz — a WRONG selection. Human-only, same convention as every other
- * game's failed-attempt cue: a CPU's own mistake is silent. */
-export function playWrong(): void {
-  const c = getCtx();
-  if (!master) return;
-  const t0 = c.currentTime;
-  const osc = c.createOscillator();
-  const gain = c.createGain();
-  osc.type = "sawtooth";
-  osc.frequency.setValueAtTime(280, t0);
-  osc.frequency.exponentialRampToValueAtTime(110, t0 + 0.22);
-  gain.gain.setValueAtTime(0.24, t0);
-  gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.24);
-  osc.connect(gain).connect(master);
-  osc.start(t0);
-  osc.stop(t0 + 0.26);
-}
-
 /** A rolling flourish — final round's results screen. */
 export function playFanfare(): void {
   const c = getCtx();

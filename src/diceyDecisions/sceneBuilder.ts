@@ -17,13 +17,12 @@ import {
   LID_CLOSE_DURATION_MS,
   LID_OPEN_ANGLE_RAD,
   LID_OPEN_DURATION_MS,
-  PEG_BOARD_HEIGHT,
-  PEG_BOARD_THICKNESS,
-  PEG_BOARD_WALL_OFFSET,
-  PEG_BOARD_Y_CENTER,
   PEG_HOLE_RADIUS,
   PEG_LENGTH,
   PEG_RADIUS,
+  PEG_WALL_GAP,
+  PEG_WALL_HEIGHT,
+  PEG_WALL_THICKNESS,
   SHADOWS_ENABLED,
   SHAKE_AMPLITUDE_X,
   SHAKE_AMPLITUDE_Z,
@@ -55,7 +54,7 @@ export interface SceneContext {
   floorSectionMeshes: FloorSectionMesh[];
   dividerGroup: THREE.Group;
   diceGroup: THREE.Group;
-  pegBoardGroup: THREE.Group;
+  pegWallGroup: THREE.Group;
   lidGroup: THREE.Group;
   lidMesh: THREE.Mesh;
   pegMeshes: THREE.Mesh[];
@@ -71,6 +70,25 @@ function clamp01(v: number): number {
 
 function flatMaterial(color: number): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.05 });
+}
+
+/** A tall, thin canvas stretched to a smooth vertical gradient (deep violet -> plum -> warm gold)
+ * — a single soft blend, not a repeating texture, so it reads as "fun backdrop" rather than dark
+ * emptiness or a tiled pattern. */
+function createBackgroundTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 4;
+  canvas.height = 512;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "#2c1854");
+  gradient.addColorStop(0.5, "#8a2f6e");
+  gradient.addColorStop(1, "#ffb648");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }
 
 function buildStaticBox(boxRoot: THREE.Group): void {
@@ -122,10 +140,11 @@ function buildLid(boxRoot: THREE.Group, roundNumber: number): { lidGroup: THREE.
 }
 
 function buildPegs(boxRoot: THREE.Group, session: DiceyDecisionsSession): THREE.Mesh[] {
+  // A cylinder's default orientation already stands along +Y — no rotation needed, it just stands
+  // straight up out of its hole like a golf tee.
   const geo = new THREE.CylinderGeometry(PEG_RADIUS, PEG_RADIUS, PEG_LENGTH, 14);
   return session.identities.map((identity) => {
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: identity.color, roughness: 0.35, metalness: 0.15 }));
-    mesh.rotation.x = Math.PI / 2; // cylinder's length axis -> world Z, so it "inserts" horizontally
     mesh.visible = false;
     mesh.castShadow = SHADOWS_ENABLED;
     boxRoot.add(mesh);
@@ -140,7 +159,7 @@ export function createSceneContext(canvas: HTMLCanvasElement, session: DiceyDeci
   renderer.shadowMap.enabled = SHADOWS_ENABLED;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x14100c);
+  scene.background = createBackgroundTexture();
 
   const camera = new THREE.PerspectiveCamera(CAMERA_FOV, CANVAS_W / CANVAS_H, 0.1, 100);
   camera.position.set(0, CAMERA_HEIGHT, CAMERA_BACK);
@@ -171,8 +190,8 @@ export function createSceneContext(canvas: HTMLCanvasElement, session: DiceyDeci
   boxRoot.add(dividerGroup);
   const diceGroup = new THREE.Group();
   boxRoot.add(diceGroup);
-  const pegBoardGroup = new THREE.Group();
-  boxRoot.add(pegBoardGroup);
+  const pegWallGroup = new THREE.Group();
+  boxRoot.add(pegWallGroup);
   const pegMeshes = buildPegs(boxRoot, session);
 
   return {
@@ -183,7 +202,7 @@ export function createSceneContext(canvas: HTMLCanvasElement, session: DiceyDeci
     floorSectionMeshes: [],
     dividerGroup,
     diceGroup,
-    pegBoardGroup,
+    pegWallGroup,
     lidGroup,
     lidMesh,
     pegMeshes,
@@ -215,7 +234,9 @@ function rebuildFloorAndDividers(ctx: SceneContext, session: DiceyDecisionsSessi
   }
 
   const { cols, rows } = sectionGridShape(session.round.config.sections);
-  const dividerMat = flatMaterial(WOOD_DARK_COLOR);
+  // Same wood material as the outer walls — not the old flat dark color — so every wall-like
+  // surface in the box reads as one consistent material.
+  const dividerMat = createWoodMaterial(0.6, 0.6);
   for (let c = 1; c < cols; c++) {
     const x = -FLOOR_WIDTH / 2 + (FLOOR_WIDTH / cols) * c;
     const wall = new THREE.Mesh(new THREE.BoxGeometry(DIVIDER_THICKNESS, DIVIDER_HEIGHT, FLOOR_DEPTH), dividerMat);
@@ -255,30 +276,63 @@ function sectionNorthZ(b: SectionBounds): number {
   return b.cz - b.depth / 2;
 }
 
-/** Every section's own peg board — a slim strip mounted on its north wall with 4 always-visible
- * dark holes. Rebuilt alongside the floor/dividers whenever the section count changes. */
-function rebuildPegBoards(ctx: SceneContext, session: DiceyDecisionsSession): void {
-  ctx.pegBoardGroup.clear();
+// Where a peg's own bottom end sits — just above the dark socket cap at the hole's base, so it
+// reads as plugged all the way down into the hole rather than floating above it.
+const PEG_BASE_Y = 0.06;
+
+/** A flat rectangular slab (width x thickness, standing PEG_WALL_HEIGHT tall) with genuine round
+ * holes bored straight through it top-to-bottom at each of holeLocalXs — built via THREE.Shape's
+ * hole-path support rather than a flat dark circle, so the holes are real geometry (you can see
+ * into them, not just a black dot painted on the surface). The 2D shape is authored in the XY
+ * plane (X = width, Y = thickness) and extruded along Z, then rotated so that extrusion axis
+ * becomes world Y — the holes end up boring straight up through the slab's height. */
+function createPegWallGeometry(width: number, holeLocalXs: number[]): THREE.BufferGeometry {
+  const halfW = width / 2;
+  const halfT = PEG_WALL_THICKNESS / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(-halfW, -halfT);
+  shape.lineTo(halfW, -halfT);
+  shape.lineTo(halfW, halfT);
+  shape.lineTo(-halfW, halfT);
+  shape.lineTo(-halfW, -halfT);
+  for (const x of holeLocalXs) {
+    const hole = new THREE.Path();
+    hole.absarc(x, 0, PEG_HOLE_RADIUS, 0, Math.PI * 2, true);
+    shape.holes.push(hole);
+  }
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: PEG_WALL_HEIGHT, bevelEnabled: false, curveSegments: 20 });
+  geometry.rotateX(-Math.PI / 2);
+  return geometry;
+}
+
+/** Every section's own dedicated peg wall — a uniform pedestal (same thickness/height regardless
+ * of whether the real structure behind it is the outer box wall or a thinner interior divider,
+ * see PEG_WALL_GAP's comment in constants.ts) standing just south of its north boundary, with 4
+ * real bored holes across its top and a dark socket visible at the bottom of each one. Rebuilt
+ * alongside the floor/dividers whenever the section count changes. */
+function rebuildPegWalls(ctx: SceneContext, session: DiceyDecisionsSession): void {
+  ctx.pegWallGroup.clear();
   const bounds = sectionBounds(session.round.config.sections);
-  const boardMat = flatMaterial(WOOD_DARK_COLOR);
-  const holeMat = new THREE.MeshStandardMaterial({ color: 0x120a0c, roughness: 0.9 });
-  const holeGeo = new THREE.CylinderGeometry(PEG_HOLE_RADIUS, PEG_HOLE_RADIUS, 0.05, 12);
+  const wallMat = createWoodMaterial(1, 0.3);
+  const socketMat = new THREE.MeshStandardMaterial({ color: 0x0c0605, roughness: 0.95 });
+  const socketGeo = new THREE.CylinderGeometry(PEG_HOLE_RADIUS * 0.9, PEG_HOLE_RADIUS * 0.9, 0.05, 14);
 
   for (const b of bounds) {
-    const northZ = sectionNorthZ(b);
-    const boardCenterZ = northZ + PEG_BOARD_WALL_OFFSET;
-    const board = new THREE.Mesh(new THREE.BoxGeometry(b.width * 0.92, PEG_BOARD_HEIGHT, PEG_BOARD_THICKNESS), boardMat);
-    board.position.set(b.cx, PEG_BOARD_Y_CENTER, boardCenterZ);
-    board.castShadow = true;
-    board.receiveShadow = true;
-    ctx.pegBoardGroup.add(board);
+    const wallWidth = b.width * 0.92;
+    const wallCenterZ = sectionNorthZ(b) + PEG_WALL_GAP + PEG_WALL_THICKNESS / 2;
+    const holeXs = sectionPegHoleXs(b);
+    const localHoleXs = holeXs.map((x) => x - b.cx);
 
-    const boardFrontZ = boardCenterZ + PEG_BOARD_THICKNESS / 2;
-    for (const holeX of sectionPegHoleXs(b)) {
-      const hole = new THREE.Mesh(holeGeo, holeMat);
-      hole.rotation.x = Math.PI / 2;
-      hole.position.set(holeX, PEG_BOARD_Y_CENTER, boardFrontZ - 0.005);
-      ctx.pegBoardGroup.add(hole);
+    const wall = new THREE.Mesh(createPegWallGeometry(wallWidth, localHoleXs), wallMat);
+    wall.position.set(b.cx, 0, wallCenterZ);
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    ctx.pegWallGroup.add(wall);
+
+    for (const holeX of holeXs) {
+      const socket = new THREE.Mesh(socketGeo, socketMat);
+      socket.position.set(holeX, 0.025, wallCenterZ);
+      ctx.pegWallGroup.add(socket);
     }
   }
 }
@@ -348,10 +402,24 @@ function updatePegs(ctx: SceneContext, session: DiceyDecisionsSession): void {
     const b = bounds[section]!;
     const holeXs = sectionPegHoleXs(b);
     const holeX = holeXs[holeIndex] ?? holeXs[holeXs.length - 1]!;
-    const boardFrontZ = sectionNorthZ(b) + PEG_BOARD_WALL_OFFSET + PEG_BOARD_THICKNESS / 2;
-    mesh.position.set(holeX, PEG_BOARD_Y_CENTER, boardFrontZ + PEG_LENGTH * 0.3);
+    const wallCenterZ = sectionNorthZ(b) + PEG_WALL_GAP + PEG_WALL_THICKNESS / 2;
+    mesh.position.set(holeX, PEG_BASE_Y + PEG_LENGTH / 2, wallCenterZ);
     mesh.visible = true;
   }
+}
+
+/** Screen-space position (percentages, 0-100) of a player's current peg tip — for main.ts to pop
+ * a floating "+N" score number there. Reads the peg's already-updated world position (set by
+ * updatePegs during the previous render call), so it's safe to call the same tick a round scores,
+ * before this frame's own render happens. Returns null if that player has no peg showing. */
+export function pegScreenPosition(ctx: SceneContext, playerId: number): { xPct: number; yPct: number } | null {
+  const mesh = ctx.pegMeshes[playerId];
+  if (!mesh || !mesh.visible) return null;
+  const world = new THREE.Vector3();
+  mesh.getWorldPosition(world);
+  world.y += PEG_LENGTH * 0.6; // pop just above the peg's own tip
+  const projected = world.project(ctx.camera);
+  return { xPct: ((projected.x + 1) / 2) * 100, yPct: ((1 - projected.y) / 2) * 100 };
 }
 
 function updateFloorHighlight(ctx: SceneContext, session: DiceyDecisionsSession): void {
@@ -374,7 +442,7 @@ export function renderDiceyScene(ctx: SceneContext, session: DiceyDecisionsSessi
   if (ctx.cachedRound !== session.round) {
     rebuildFloorAndDividers(ctx, session);
     rebuildDice(ctx, session);
-    rebuildPegBoards(ctx, session);
+    rebuildPegWalls(ctx, session);
     disposeLidMaterials(ctx.lidMesh.material as THREE.Material[]);
     ctx.lidMesh.material = createLidMaterials(session.roundIndex + 1);
     ctx.cachedRound = session.round;
