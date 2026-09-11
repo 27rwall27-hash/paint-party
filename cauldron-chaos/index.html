@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cauldron Chaos</title>
+  </head>
+  <body>
+    <div id="app">
+      <a id="backToSuite" href="/">&larr; Suite</a>
+      <div id="hud"></div>
+      <div class="sceneWrap">
+        <canvas id="cauldronScene" width="1400" height="1000"></canvas>
+      </div>
+
+      <div id="setupPanel">
+        <p class="settingsHint">
+          5 rounds. Each round the witch rattles off a list of potion ingredients — fast, and it
+          only gets faster. Then, taking turns, pour a bottle from the shelf into the cauldron.
+          Pour something that was on her list (and not already used) and you're safe. Pour wrong,
+          or repeat one already used, and it backfires — you're out for the round. Last one still
+          brewing scores the most.
+        </p>
+        <div class="settingsRow">
+          <input id="playerNameInput" type="text" maxlength="12" placeholder="You" />
+        </div>
+        <div id="playerColorPicker"></div>
+        <div class="settingsRow">
+          <button id="startBtn" type="button">Start</button>
+        </div>
+      </div>
+      <button id="playAgainBtn" type="button" hidden>Play Again</button>
+    </div>
+    <script type="module" src="/src/cauldronChaos/main.ts"></script>
+  </body>
+</html>
