@@ -12,6 +12,7 @@ import {
   MID_INDEX,
   OUTER_BORDER_WIDTH,
   PLAYER_RADIUS,
+  STEP_DISTANCE,
   TOTAL_ROOMS,
   VESTIBULE_DEPTH,
   WALL_COLOR,
@@ -122,6 +123,11 @@ function doorSwingT(session: LightMazeSession, edge: DoorEdge, now: number): num
 
 function drawWallsAndDoors(ctx: CanvasRenderingContext2D, session: LightMazeSession, layout: Layout, now: number): void {
   ctx.lineCap = "round";
+  // Once the game's over, every door that COULD have been opened (real, whether it happened to be
+  // open or closed at the final instant) just disappears from the board entirely — a permanent
+  // dead end stays visible as a reminder of which ones were traps, but the real doors that decided
+  // the outcome fade out of the picture rather than lingering mid-swing or sitting there closed.
+  const openableDoorsGone = session.phase === "RESULTS";
   for (const edge of session.grid.edges.values()) {
     const geom = computeEdgeGeom(layout, edge);
 
@@ -130,6 +136,8 @@ function drawWallsAndDoors(ctx: CanvasRenderingContext2D, session: LightMazeSess
     ctx.lineWidth = WALL_WIDTH;
     line(ctx, geom.wallStart.x, geom.wallStart.y, geom.doorStart.x, geom.doorStart.y);
     line(ctx, geom.doorEnd.x, geom.doorEnd.y, geom.wallEnd.x, geom.wallEnd.y);
+
+    if (openableDoorsGone && edge.state !== "closed-fake") continue;
 
     // The door itself, hinged at its own near end, distinctly colored.
     const swingT = doorSwingT(session, edge, now);
@@ -276,34 +284,108 @@ function drawFailedMarker(ctx: CanvasRenderingContext2D, session: LightMazeSessi
   ctx.stroke();
 }
 
-function drawPlayerToken(ctx: CanvasRenderingContext2D, layout: Layout, player: PlayerState, identity: PlayerIdentity): void {
+const FACING_VEC: Record<string, { x: number; y: number }> = {
+  N: { x: 0, y: -1 },
+  S: { x: 0, y: 1 },
+  E: { x: 1, y: 0 },
+  W: { x: -1, y: 0 },
+};
+
+/** A small top-down "3D-ish" runner: a ground shadow that stays put, a body that bobs and casts
+ * that shadow, and two feet that swing fore/aft in opposite phase — all driven by
+ * `player.distanceMoved` (room-units actually covered, see LightMazeSession's trackFootsteps), so
+ * the whole cycle — visual AND the footstep sound riding the same counter — advances exactly with
+ * real movement and freezes the instant a player stops or is blocked, rather than animating on a
+ * disconnected timer. */
+function drawPlayerToken(ctx: CanvasRenderingContext2D, layout: Layout, player: PlayerState, identity: PlayerIdentity, now: number, showExitLabel: boolean): void {
   if (player.exited) return;
   const pos = worldToPixel(layout, player.pos);
   const radius = layout.cellSize * PLAYER_RADIUS;
+  const facingVec = FACING_VEC[player.facing]!;
+  const perpVec = { x: -facingVec.y, y: facingVec.x };
 
-  const facingVec = { N: { x: 0, y: -1 }, S: { x: 0, y: 1 }, E: { x: 1, y: 0 }, W: { x: -1, y: 0 } }[player.facing];
+  const gaitPhase = (player.distanceMoved / STEP_DISTANCE) * Math.PI;
+  const stride = Math.sin(gaitPhase);
+  const bob = Math.abs(stride) * radius * 0.22;
+  const bodyY = pos.y - bob;
+
+  // Ground shadow — fixed on the floor (doesn't bob with the body), the main cue that the body
+  // above it has some height rather than being flat.
   ctx.beginPath();
-  ctx.moveTo(pos.x + facingVec.x * radius * 1.9, pos.y + facingVec.y * radius * 1.9);
-  ctx.lineTo(pos.x + facingVec.x * radius * 0.9 - facingVec.y * radius * 0.5, pos.y + facingVec.y * radius * 0.9 + facingVec.x * radius * 0.5);
-  ctx.lineTo(pos.x + facingVec.x * radius * 0.9 + facingVec.y * radius * 0.5, pos.y + facingVec.y * radius * 0.9 - facingVec.x * radius * 0.5);
-  ctx.closePath();
-  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.ellipse(pos.x, pos.y + radius * 0.7, radius * 0.85, radius * 0.4, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(0,0,0,0.38)";
   ctx.fill();
 
+  // Two feet, offset to either side of the facing axis, swinging fore/aft in opposite phase.
+  const footSpread = radius * 0.5;
+  const strideLen = radius * 0.65;
+  for (const side of [-1, 1]) {
+    const swing = side === 1 ? stride : -stride;
+    const fx = pos.x + perpVec.x * footSpread * side + facingVec.x * strideLen * swing;
+    const fy = pos.y + perpVec.y * footSpread * side + facingVec.y * strideLen * swing;
+    ctx.beginPath();
+    ctx.ellipse(fx, fy, radius * 0.24, radius * 0.24, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(15,12,18,0.6)";
+    ctx.fill();
+  }
+
+  // Body — a radial gradient (bright upper-left, true color toward the rim) for a rounded, faintly
+  // 3D "ball" look instead of a flat tinted disc.
+  const grad = ctx.createRadialGradient(pos.x - radius * 0.35, bodyY - radius * 0.4, radius * 0.05, pos.x, bodyY, radius);
+  grad.addColorStop(0, lerpColor(identity.color, "#ffffff", 0.55));
+  grad.addColorStop(1, identity.color);
   ctx.beginPath();
-  ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-  ctx.fillStyle = identity.color;
+  ctx.arc(pos.x, bodyY, radius, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
   ctx.fill();
   ctx.strokeStyle = "#0a0a0a";
   ctx.lineWidth = 2;
   ctx.stroke();
 
+  // Facing notch — a small nudge toward the facing direction, still useful when stationary (feet
+  // alone give no directional cue at rest).
+  ctx.beginPath();
+  ctx.arc(pos.x + facingVec.x * radius * 0.55, bodyY + facingVec.y * radius * 0.55, radius * 0.22, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.fill();
+
   if (identity.id === 0) {
     ctx.beginPath();
-    ctx.arc(pos.x, pos.y, radius * 0.45, 0, Math.PI * 2);
+    ctx.arc(pos.x, bodyY, radius * 0.4, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(0,0,0,0.4)";
     ctx.fill();
   }
+
+  if (showExitLabel && player.coloredRoomCount >= TOTAL_ROOMS) drawHeadForExitLabel(ctx, pos.x, bodyY - radius, radius, now);
+}
+
+/** A small pulsing callout above a player's head once they've lit every room — the cue to go find
+ * their own entrance again (see clampAxis's exit gate). */
+function drawHeadForExitLabel(ctx: CanvasRenderingContext2D, x: number, topY: number, radius: number, now: number): void {
+  const text = "Head for the exit!";
+  ctx.font = "bold 12px 'Segoe UI', system-ui, sans-serif";
+  const textWidth = ctx.measureText(text).width;
+  const padX = 8;
+  const boxW = textWidth + padX * 2;
+  const boxH = 20;
+  const labelY = topY - radius * 1.7;
+  const pulse = 0.75 + 0.25 * Math.sin(now / 350);
+
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = "rgba(20,16,26,0.88)";
+  ctx.beginPath();
+  ctx.roundRect(x - boxW / 2, labelY - boxH / 2, boxW, boxH, 6);
+  ctx.fill();
+  ctx.strokeStyle = "#ffe27a";
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+
+  ctx.fillStyle = "#ffe27a";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x, labelY + 1);
+  ctx.restore();
 }
 
 function drawHud(ctx: CanvasRenderingContext2D, session: LightMazeSession): void {
@@ -335,12 +417,21 @@ function drawHud(ctx: CanvasRenderingContext2D, session: LightMazeSession): void
 }
 
 function drawResults(ctx: CanvasRenderingContext2D, session: LightMazeSession): void {
-  ctx.fillStyle = "rgba(27, 22, 32, 0.92)";
+  // Lighter than before, and only softly dimming rather than obscuring — the point of the board
+  // underneath now (every openable door gone, see drawWallsAndDoors) is meant to actually be seen.
+  ctx.fillStyle = "rgba(27, 22, 32, 0.45)";
   ctx.fillRect(0, HUD_HEIGHT, CANVAS_W, CANVAS_H - HUD_HEIGHT);
 
   const cx = CANVAS_W / 2;
   const cy = CANVAS_H / 2;
   const loser = session.identities[session.loserId!]!;
+
+  ctx.fillStyle = "rgba(27, 22, 32, 0.85)";
+  const boxW = 640;
+  const boxH = 130;
+  ctx.beginPath();
+  ctx.roundRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH, 14);
+  ctx.fill();
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -363,7 +454,7 @@ export function render(ctx: CanvasRenderingContext2D, session: LightMazeSession,
   drawWallsAndDoors(ctx, session, layout, now);
   drawOuterBorder(ctx, layout);
   drawEntrances(ctx, session, layout, now);
-  for (const player of session.players) drawPlayerToken(ctx, layout, player, session.identities[player.id]!);
+  for (const player of session.players) drawPlayerToken(ctx, layout, player, session.identities[player.id]!, now, session.phase === "PLAYING");
   drawFailedMarker(ctx, session, layout, now);
   drawHud(ctx, session);
 

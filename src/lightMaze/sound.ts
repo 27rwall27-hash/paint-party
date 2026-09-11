@@ -154,3 +154,25 @@ export function playDoorsReshut(): void {
   rattle.start(t0);
   rattle.stop(t0 + 0.18);
 }
+
+/** A soft, short filtered-noise "tap" — one footstep. Loud enough for the human to actually hear
+ * their own pace, near-inaudible for CPUs (same loud/quiet-for-CPU convention every other cue in
+ * this game uses) since up to 3 of them could be stepping at once. A touch of random pitch
+ * wobble per call so a run of steps doesn't sound like a mechanical loop. */
+export function playFootstep(volume: number): void {
+  const c = getCtx();
+  if (!master) return;
+  const t0 = c.currentTime;
+  const src = c.createBufferSource();
+  src.buffer = getNoiseBuffer(c);
+  const filter = c.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = 260 + Math.random() * 90;
+  filter.Q.value = 1.1;
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(volume, t0);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.07);
+  src.connect(filter).connect(gain).connect(master);
+  src.start(t0);
+  src.stop(t0 + 0.08);
+}

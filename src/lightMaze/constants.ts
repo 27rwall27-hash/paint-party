@@ -46,6 +46,14 @@ export const VESTIBULE_LATERAL_CLAMP = 0.6;
 // proximity to the wall itself.
 export const DOOR_INTERACT_DISTANCE = 0.42;
 
+// A running/footstep cycle is driven by DISTANCE actually covered (room-units), not elapsed time —
+// so the animation and its footstep sound are always in lockstep with each other and naturally
+// freeze the instant a player stops, rather than needing a separate "am I moving" timer. One full
+// stride pair (left foot down, right foot down) every STEP_DISTANCE of travel.
+export const STEP_DISTANCE = 0.42;
+export const FOOTSTEP_VOLUME_HUMAN = 0.22;
+export const FOOTSTEP_VOLUME_CPU = 0.05;
+
 // --- Door swing animation ----------------------------------------------------------------------
 // Each door is a small SECTION centered in the middle of its wall (not the whole wall), flanked on
 // both sides by a plain, permanently solid stub of ordinary wall — and rendered in DOOR_COLOR, a

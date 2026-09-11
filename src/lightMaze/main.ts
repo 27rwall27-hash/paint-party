@@ -1,4 +1,5 @@
 import "./style.css";
+import { FOOTSTEP_VOLUME_CPU, FOOTSTEP_VOLUME_HUMAN } from "./constants.ts";
 import { createIdentities } from "./identities.ts";
 import { createLightMazeSession, updateLightMazeSession, type LightMazeSession } from "./LightMazeSession.ts";
 import type { Side } from "./grid.ts";
@@ -78,6 +79,7 @@ function loop(time: number): void {
     if (session.humanDoorFailedThisTick) sound.playDoorFail();
     for (const playerId of session.exitedThisTick) sound.playExit(playerId === 0);
     if (session.doorsReshutThisTick) sound.playDoorsReshut();
+    for (const playerId of session.footstepsThisTick) sound.playFootstep(playerId === 0 ? FOOTSTEP_VOLUME_HUMAN : FOOTSTEP_VOLUME_CPU);
     if (session.phase === "ENDING" && !wasEnding) sound.playGameOver();
     wasEnding = session.phase === "ENDING";
 

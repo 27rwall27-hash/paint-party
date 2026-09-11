@@ -15,6 +15,7 @@ import {
   PLAYER_RADIUS,
   PLAYER_SPEED,
   RESHUT_INTERVAL_MS,
+  STEP_DISTANCE,
   TOTAL_ROOMS,
   VESTIBULE_DEPTH,
   VESTIBULE_LATERAL_CLAMP,
@@ -68,6 +69,11 @@ export interface PlayerState {
   exitedAt: number | null;
   coloredRoomCount: number;
   cpu: CpuBrain | null;
+  /** Cumulative distance actually covered (room-units) — drives the running animation's gait
+   * phase and, via STEP_DISTANCE crossings, the footstep sound (see trackFootsteps). Only ever
+   * grows when `pos` actually moves, so it — and the animation/sound riding on it — naturally
+   * freezes the instant a player stops or is blocked by a wall. */
+  distanceMoved: number;
 }
 
 export type LightMazePhase = "PLAYING" | "ENDING" | "RESULTS";
@@ -100,6 +106,8 @@ export interface LightMazeSession {
   humanDoorFailedThisTick: boolean;
   exitedThisTick: number[];
   doorsReshutThisTick: boolean;
+  /** Player ids whose gait crossed a STEP_DISTANCE boundary this tick — see trackFootsteps. */
+  footstepsThisTick: number[];
 }
 
 export interface LightMazeInput {
@@ -171,6 +179,7 @@ export function createLightMazeSession(identities: PlayerIdentity[], now: number
       exitedAt: null,
       coloredRoomCount: 0,
       cpu: identity.isBot ? createCpuBrain(room, now) : null,
+      distanceMoved: 0,
     };
   });
 
@@ -191,6 +200,7 @@ export function createLightMazeSession(identities: PlayerIdentity[], now: number
     humanDoorFailedThisTick: false,
     exitedThisTick: [],
     doorsReshutThisTick: false,
+    footstepsThisTick: [],
   };
 }
 
@@ -363,6 +373,19 @@ function applyCpuMovement(session: LightMazeSession, player: PlayerState, dt: nu
   }
 }
 
+/** Compares `player.pos` against where it was before this tick's movement, adds the actual
+ * distance covered to `distanceMoved`, and — if that crossed a STEP_DISTANCE boundary — records a
+ * footstep for main.ts's sound dispatch. Driven purely by realized movement (post-collision), so a
+ * player blocked by a wall (net zero displacement) never racks up a phantom step. */
+function trackFootsteps(session: LightMazeSession, player: PlayerState, beforePos: Position): void {
+  const dist = Math.hypot(player.pos.row - beforePos.row, player.pos.col - beforePos.col);
+  if (dist <= 0) return;
+  const before = Math.floor(player.distanceMoved / STEP_DISTANCE);
+  player.distanceMoved += dist;
+  const after = Math.floor(player.distanceMoved / STEP_DISTANCE);
+  if (after > before) session.footstepsThisTick.push(player.id);
+}
+
 function updateRoomTracking(session: LightMazeSession, player: PlayerState, now: number): void {
   const wasOutside = player.outside;
   const nowOutside = isOutsideGrid(player.pos);
@@ -391,6 +414,7 @@ export function updateLightMazeSession(session: LightMazeSession, now: number, i
   session.humanDoorFailedThisTick = false;
   session.exitedThisTick = [];
   session.doorsReshutThisTick = false;
+  session.footstepsThisTick = [];
 
   if (session.phase === "ENDING") {
     if (now - session.endingStartedAt! >= DOOR_SWING_SHUT_MS + ENDING_HOLD_MS) session.phase = "RESULTS";
@@ -404,14 +428,18 @@ export function updateLightMazeSession(session: LightMazeSession, now: number, i
 
   const human = session.players[0]!;
   if (!human.exited) {
+    const beforePos = { ...human.pos };
     applyHumanMovement(session, human, input, dt);
+    trackFootsteps(session, human, beforePos);
     if (input.clicked) attemptOpenNearbyDoor(session, human, now);
     updateRoomTracking(session, human, now);
   }
 
   for (const player of session.players) {
     if (!player.isBot || player.exited) continue;
+    const beforePos = { ...player.pos };
     applyCpuMovement(session, player, dt, now);
+    trackFootsteps(session, player, beforePos);
     updateRoomTracking(session, player, now);
   }
 
