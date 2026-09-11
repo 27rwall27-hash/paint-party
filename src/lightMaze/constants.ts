@@ -1,5 +1,5 @@
-export const CANVAS_W = 1600;
-export const CANVAS_H = 1660;
+export const CANVAS_W = 1800;
+export const CANVAS_H = 1860;
 export const HUD_HEIGHT = 60;
 
 export const PLAYER_COUNT = 4;
@@ -33,13 +33,21 @@ export const FAKE_DOOR_FRACTION = 1;
 export const PLAYER_RADIUS = 0.16;
 // Free (not grid-locked) movement speed, in room-units per second — held WASD keys combine into a
 // real direction vector (diagonals included), resolved against walls/closed doors per axis.
-export const PLAYER_SPEED = 1.5;
-// Noticeably faster than the human's own (deliberately slow) pace — "better" CPUs, per direct
-// feedback, combining this with the quicker decision pacing below.
-export const CPU_MOVE_SPEED = 1.9;
+// Deliberately slow baseline now (per direct feedback) — see FIRST_DISCOVERY_SPEED_BONUS below for
+// how a player actually picks up pace over the course of a game.
+export const PLAYER_SPEED = 0.9;
+// Still a bit faster than the human's own baseline out of the gate — "better" CPUs, per earlier
+// feedback — but both start from a much slower baseline now, and both benefit equally from the
+// discovery speed bonus.
+export const CPU_MOVE_SPEED = 1.1;
+// The first player to ever set foot in a given room (see LightMazeSession's markRoomVisited) gets
+// a permanent +3% move-speed bonus, ADDED (not multiplied) onto whatever bonus they already have —
+// "non-compounding": 10 first-discoveries is +30% total, not 1.03^10. Rewards staying ahead of the
+// pack rather than following an already-opened path, and the reward only ever grows, never resets.
+export const FIRST_DISCOVERY_SPEED_BONUS = 0.03;
 // How far outside the grid each player's own starting "vestibule" extends, and how tightly their
 // lateral position is held near their own entrance while out there.
-export const VESTIBULE_DEPTH = 0.85;
+export const VESTIBULE_DEPTH = 0.5;
 export const VESTIBULE_LATERAL_CLAMP = 0.6;
 // How close (along the wall-facing axis, in room-units) a player must stand to actually attempt
 // opening the nearest closed door — doesn't matter which way they're currently facing, just
@@ -100,5 +108,7 @@ export const CPU_FIRST_DECISION_DELAY_MS = 900;
 
 // --- Rendering --------------------------------------------------------------------------------
 export const GRID_MARGIN = 25; // px of breathing room around the full (grid + vestibule) layout
-export const OUTER_BORDER_WIDTH = 12; // px — thick, high-contrast frame around the grid perimeter
-export const WALL_WIDTH = 5; // px — regular interior door/wall line weight
+export const OUTER_BORDER_WIDTH = 20; // px — thick, high-contrast frame around the grid perimeter
+export const WALL_WIDTH = 11; // px — regular interior wall/door line weight, much thicker per feedback
+// The 2x2 block of per-player tiles in each room — see drawRooms. Fraction of a cell's own size.
+export const TILE_BLOCK_FRACTION = 0.58;

@@ -13,6 +13,7 @@ import {
   OUTER_BORDER_WIDTH,
   PLAYER_RADIUS,
   STEP_DISTANCE,
+  TILE_BLOCK_FRACTION,
   TOTAL_ROOMS,
   VESTIBULE_DEPTH,
   WALL_COLOR,
@@ -147,7 +148,7 @@ function drawWallsAndDoors(ctx: CanvasRenderingContext2D, session: LightMazeSess
     const dirX = geom.wallDir.x * cos + geom.perpDir.x * sin;
     const dirY = geom.wallDir.y * cos + geom.perpDir.y * sin;
     ctx.strokeStyle = DOOR_COLOR;
-    ctx.lineWidth = WALL_WIDTH + 1;
+    ctx.lineWidth = WALL_WIDTH + 3;
     line(ctx, geom.doorStart.x, geom.doorStart.y, geom.doorStart.x + dirX * geom.doorLen, geom.doorStart.y + dirY * geom.doorLen);
   }
 }
@@ -218,45 +219,45 @@ function drawEntrances(ctx: CanvasRenderingContext2D, session: LightMazeSession,
   }
 }
 
-const QUADRANT_RECT: Record<string, [number, number]> = { TL: [0, 0], TR: [0.5, 0], BL: [0, 0.5], BR: [0.5, 0.5] };
+const QUADRANT_RECT: Record<string, [number, number]> = { TL: [0, 0], TR: [1, 0], BL: [0, 1], BR: [1, 1] };
 
-function drawRooms(ctx: CanvasRenderingContext2D, session: LightMazeSession, layout: Layout): void {
+/** Each room's 4 per-player tiles as one solid 2x2 block, centered in the room, every tile
+ * touching its neighbors at the shared center point — not spread out with gaps. A tile whose
+ * owner has lit every room in the maze (coloredRoomCount >= TOTAL_ROOMS) pulses with a slow glow
+ * — the "go find your own exit" cue, now living on the player's own tiles instead of a callout
+ * above their head. */
+function drawRooms(ctx: CanvasRenderingContext2D, session: LightMazeSession, layout: Layout, now: number): void {
+  const tileSize = (layout.cellSize * TILE_BLOCK_FRACTION) / 2;
+  const pulse = 0.5 + 0.5 * Math.sin(now / 900);
   for (let row = 0; row < GRID_SIZE; row++) {
     for (let col = 0; col < GRID_SIZE; col++) {
       const cell = session.rooms[row]![col]!;
-      const x = layout.originX + (col - 0.5) * layout.cellSize;
-      const y = layout.originY + (row - 0.5) * layout.cellSize;
-      const half = layout.cellSize / 2;
-      const squareSize = layout.cellSize * 0.26;
+      const center = roomCenter(layout, cell.room);
 
       for (let playerId = 0; playerId < 4; playerId++) {
         const quadrant = QUADRANT_BY_PLAYER[playerId]!;
         const [qx, qy] = QUADRANT_RECT[quadrant]!;
-        const quadCx = x + (qx + 0.25) * half * 2;
-        const quadCy = y + (qy + 0.25) * half * 2;
+        // qx/qy are 0 or 1 -> tile corner touching the block's own center is (center.x, center.y),
+        // and each tile extends tileSize further out from there in its own quadrant's direction.
+        const tileLeft = center.x + (qx === 0 ? -tileSize : 0);
+        const tileTop = center.y + (qy === 0 ? -tileSize : 0);
         const visited = cell.visitedByPlayer[playerId];
         if (visited) {
+          const player = session.players[playerId]!;
+          const fullyLit = player.coloredRoomCount >= TOTAL_ROOMS;
+          if (fullyLit) {
+            ctx.save();
+            ctx.shadowColor = session.identities[playerId]!.color;
+            ctx.shadowBlur = 6 + pulse * 14;
+          }
           ctx.fillStyle = session.identities[playerId]!.color;
-          ctx.fillRect(quadCx - squareSize / 2, quadCy - squareSize / 2, squareSize, squareSize);
+          ctx.fillRect(tileLeft, tileTop, tileSize, tileSize);
+          if (fullyLit) ctx.restore();
         } else {
           ctx.strokeStyle = "rgba(255,255,255,0.08)";
           ctx.lineWidth = 2;
-          ctx.strokeRect(quadCx - squareSize / 2, quadCy - squareSize / 2, squareSize, squareSize);
+          ctx.strokeRect(tileLeft, tileTop, tileSize, tileSize);
         }
-      }
-
-      const litFraction = cell.visitedByPlayer.filter(Boolean).length / 4;
-      const center = roomCenter(layout, cell.room);
-      ctx.beginPath();
-      ctx.arc(center.x, center.y, Math.max(3, layout.cellSize * 0.045), 0, Math.PI * 2);
-      ctx.fillStyle = lerpColor("#4a4456", "#ffe27a", litFraction);
-      ctx.fill();
-      if (litFraction >= 1) {
-        ctx.save();
-        ctx.shadowColor = "#ffe27a";
-        ctx.shadowBlur = 14;
-        ctx.fill();
-        ctx.restore();
       }
     }
   }
@@ -297,7 +298,7 @@ const FACING_VEC: Record<string, { x: number; y: number }> = {
  * the whole cycle — visual AND the footstep sound riding the same counter — advances exactly with
  * real movement and freezes the instant a player stops or is blocked, rather than animating on a
  * disconnected timer. */
-function drawPlayerToken(ctx: CanvasRenderingContext2D, layout: Layout, player: PlayerState, identity: PlayerIdentity, now: number, showExitLabel: boolean): void {
+function drawPlayerToken(ctx: CanvasRenderingContext2D, layout: Layout, player: PlayerState, identity: PlayerIdentity): void {
   if (player.exited) return;
   const pos = worldToPixel(layout, player.pos);
   const radius = layout.cellSize * PLAYER_RADIUS;
@@ -355,37 +356,6 @@ function drawPlayerToken(ctx: CanvasRenderingContext2D, layout: Layout, player: 
     ctx.fillStyle = "rgba(0,0,0,0.4)";
     ctx.fill();
   }
-
-  if (showExitLabel && player.coloredRoomCount >= TOTAL_ROOMS) drawHeadForExitLabel(ctx, pos.x, bodyY - radius, radius, now);
-}
-
-/** A small pulsing callout above a player's head once they've lit every room — the cue to go find
- * their own entrance again (see clampAxis's exit gate). */
-function drawHeadForExitLabel(ctx: CanvasRenderingContext2D, x: number, topY: number, radius: number, now: number): void {
-  const text = "Head for the exit!";
-  ctx.font = "bold 12px 'Segoe UI', system-ui, sans-serif";
-  const textWidth = ctx.measureText(text).width;
-  const padX = 8;
-  const boxW = textWidth + padX * 2;
-  const boxH = 20;
-  const labelY = topY - radius * 1.7;
-  const pulse = 0.75 + 0.25 * Math.sin(now / 350);
-
-  ctx.save();
-  ctx.globalAlpha = pulse;
-  ctx.fillStyle = "rgba(20,16,26,0.88)";
-  ctx.beginPath();
-  ctx.roundRect(x - boxW / 2, labelY - boxH / 2, boxW, boxH, 6);
-  ctx.fill();
-  ctx.strokeStyle = "#ffe27a";
-  ctx.lineWidth = 1.4;
-  ctx.stroke();
-
-  ctx.fillStyle = "#ffe27a";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, x, labelY + 1);
-  ctx.restore();
 }
 
 function drawHud(ctx: CanvasRenderingContext2D, session: LightMazeSession): void {
@@ -450,11 +420,11 @@ export function render(ctx: CanvasRenderingContext2D, session: LightMazeSession,
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   const layout = computeLayout();
-  drawRooms(ctx, session, layout);
+  drawRooms(ctx, session, layout, now);
   drawWallsAndDoors(ctx, session, layout, now);
   drawOuterBorder(ctx, layout);
   drawEntrances(ctx, session, layout, now);
-  for (const player of session.players) drawPlayerToken(ctx, layout, player, session.identities[player.id]!, now, session.phase === "PLAYING");
+  for (const player of session.players) drawPlayerToken(ctx, layout, player, session.identities[player.id]!);
   drawFailedMarker(ctx, session, layout, now);
   drawHud(ctx, session);
 

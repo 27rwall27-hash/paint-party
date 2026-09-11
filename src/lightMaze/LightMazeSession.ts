@@ -11,6 +11,7 @@ import {
   DOOR_SWING_SHUT_MS,
   ENDING_HOLD_MS,
   FAILED_MARKER_MS,
+  FIRST_DISCOVERY_SPEED_BONUS,
   GRID_SIZE,
   PLAYER_RADIUS,
   PLAYER_SPEED,
@@ -74,6 +75,10 @@ export interface PlayerState {
    * grows when `pos` actually moves, so it — and the animation/sound riding on it — naturally
    * freezes the instant a player stops or is blocked by a wall. */
   distanceMoved: number;
+  /** Sum of FIRST_DISCOVERY_SPEED_BONUS for every room this player was the very first to ever
+   * enter — added straight onto the base move speed as a multiplier (1 + speedBonus), never
+   * reset, never compounded with itself. See markRoomVisited. */
+  speedBonus: number;
 }
 
 export type LightMazePhase = "PLAYING" | "ENDING" | "RESULTS";
@@ -125,8 +130,16 @@ export interface LightMazeInput {
 function markRoomVisited(session: LightMazeSession, player: PlayerState): void {
   const cell = session.rooms[player.room.row]![player.room.col]!;
   if (cell.visitedByPlayer[player.id]) return;
+  const isFirstEverHere = cell.visitedByPlayer.every((v) => !v);
   cell.visitedByPlayer[player.id] = true;
   player.coloredRoomCount++;
+  if (isFirstEverHere) player.speedBonus += FIRST_DISCOVERY_SPEED_BONUS;
+}
+
+/** Current base move speed (PLAYER_SPEED for the human, CPU_MOVE_SPEED for CPUs) scaled up by
+ * whatever discovery bonus this player has accumulated — see PlayerState.speedBonus. */
+function currentSpeed(player: PlayerState, baseSpeed: number): number {
+  return baseSpeed * (1 + player.speedBonus);
 }
 
 /** Flips every currently-open edge back to closed-real, all at once — still the same real door,
@@ -180,6 +193,7 @@ export function createLightMazeSession(identities: PlayerIdentity[], now: number
       coloredRoomCount: 0,
       cpu: identity.isBot ? createCpuBrain(room, now) : null,
       distanceMoved: 0,
+      speedBonus: 0,
     };
   });
 
@@ -271,8 +285,9 @@ function applyHumanMovement(session: LightMazeSession, player: PlayerState, inpu
     dRow *= Math.SQRT1_2;
     dCol *= Math.SQRT1_2;
   }
-  const stepRow = dRow * PLAYER_SPEED * dt;
-  const stepCol = dCol * PLAYER_SPEED * dt;
+  const speed = currentSpeed(player, PLAYER_SPEED);
+  const stepRow = dRow * speed * dt;
+  const stepCol = dCol * speed * dt;
 
   if (player.outside) {
     player.pos.row += stepRow;
@@ -335,16 +350,17 @@ function moveToward(player: PlayerState, target: Position, speed: number, dt: nu
 }
 
 function applyCpuMovement(session: LightMazeSession, player: PlayerState, dt: number, now: number): void {
+  const speed = currentSpeed(player, CPU_MOVE_SPEED);
   if (player.outside) {
-    moveToward(player, { row: player.room.row, col: player.room.col }, CPU_MOVE_SPEED, dt);
+    moveToward(player, { row: player.room.row, col: player.room.col }, speed, dt);
     return;
   }
   if (player.headingOutside) {
-    moveToward(player, outsideStartPos(player.entranceSide), CPU_MOVE_SPEED, dt);
+    moveToward(player, outsideStartPos(player.entranceSide), speed, dt);
     return;
   }
   if (player.moveTarget) {
-    moveToward(player, { row: player.moveTarget.row, col: player.moveTarget.col }, CPU_MOVE_SPEED, dt);
+    moveToward(player, { row: player.moveTarget.row, col: player.moveTarget.col }, speed, dt);
     if (player.pos.row === player.moveTarget.row && player.pos.col === player.moveTarget.col) player.moveTarget = null;
     return;
   }
