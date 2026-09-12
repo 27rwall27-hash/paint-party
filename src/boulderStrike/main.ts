@@ -1,5 +1,5 @@
 import "./style.css";
-import { GLEAM_SHAPES, ORE_TIERS, ROUND_CONFIGS } from "./constants.ts";
+import { ORE_TIERS, ROUND_CONFIGS } from "./constants.ts";
 import { createIdentities } from "./identities.ts";
 import { createBoulderStrikeSession, updateBoulderStrikeSession, type BoulderStrikeSession } from "./BoulderStrikeSession.ts";
 import { drawGleamShape } from "./gleamShapes.ts";
@@ -121,10 +121,6 @@ function loop(time: number): void {
     updateBoulderStrikeSession(session, time, { released: pendingRelease });
     pendingRelease = false;
 
-    if (session.gleamChangedThisTick) {
-      if (session.gleamChangedThisTick.isTarget) sound.playTargetChime();
-      else sound.playDecoyBlip(GLEAM_SHAPES.indexOf(session.gleamChangedThisTick.combo.shape));
-    }
     for (const event of session.playersResolvedThisTick) {
       if (event.success) sound.playShatter(event.playerId === 0);
       else if (event.playerId === 0) sound.playWhiff();

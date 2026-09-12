@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   AMBIENT_LIGHT_INTENSITY,
+  ARM_RAISE_FOLLOW,
   BOULDER_RADIUS,
   BOULDER_SPACING,
   CAMERA_BACK,
@@ -19,6 +20,12 @@ import {
   REVEAL_HOLD_MS,
   ROUND_CONFIGS,
   SHADOWS_ENABLED,
+  TOOL_RAISED_POS,
+  TOOL_RAISED_ROT_X,
+  TOOL_REST_POS,
+  TOOL_REST_ROT_X,
+  TOOL_SWING_POS,
+  TOOL_SWING_ROT_X,
   WALK_DURATION_MS,
   type GleamCombo,
 } from "./constants.ts";
@@ -42,6 +49,12 @@ function boulderZ(roundIndex: number): number {
 }
 function standZ(roundIndex: number): number {
   return boulderZ(roundIndex) + PLAYER_STAND_OFFSET;
+}
+/** A point between the current round's boulder and where players stand for it — what the camera
+ * re-centers on every round, so whichever boulder/pickaxes are actually in play stay framed
+ * regardless of how far down the line the game has gotten. */
+function cameraCenterZ(roundIndex: number): number {
+  return boulderZ(roundIndex) + PLAYER_STAND_OFFSET / 2;
 }
 
 // --- Environment (soft ambient fill) --------------------------------------------------------
@@ -175,10 +188,12 @@ function createPickaxe(): PickaxeRig {
 
 interface CharacterRig {
   group: THREE.Group;
-  armPivot: THREE.Group;
+  toolGrip: THREE.Group;
   pickaxe: PickaxeRig;
   legL: THREE.Group;
   legR: THREE.Group;
+  armL: THREE.Group;
+  armR: THREE.Group;
 }
 
 function buildLimbPivot(color: string | number, length: number, radius: number): THREE.Group {
@@ -221,16 +236,24 @@ function buildCharacter(color: string): CharacterRig {
   head.castShadow = SHADOWS_ENABLED;
   group.add(head);
 
-  const armPivot = new THREE.Group();
-  armPivot.position.set(CHARACTER_RADIUS * 0.7, shoulderY, CHARACTER_RADIUS * 0.3);
-  group.add(armPivot);
+  // Both arms flank the tool grip and mirror its rotation (see updateCharacters), so a raised
+  // pickaxe genuinely reads as a two-handed grip pulled back over the shoulder, not a one-armed
+  // half-raise.
+  const armL = buildLimbPivot(color, (shoulderY - hipY) * 0.75, CHARACTER_RADIUS * 0.18);
+  armL.position.set(-CHARACTER_RADIUS * 0.68, shoulderY + 0.1, 0);
+  group.add(armL);
+  const armR = buildLimbPivot(color, (shoulderY - hipY) * 0.75, CHARACTER_RADIUS * 0.18);
+  armR.position.set(CHARACTER_RADIUS * 0.68, shoulderY + 0.1, 0);
+  group.add(armR);
+
+  const toolGrip = new THREE.Group();
+  toolGrip.position.set(0, shoulderY, 0);
+  group.add(toolGrip);
 
   const pickaxe = createPickaxe();
-  pickaxe.group.rotation.x = -Math.PI / 2.1;
-  pickaxe.group.position.set(0, -0.05, 0.05);
-  armPivot.add(pickaxe.group);
+  toolGrip.add(pickaxe.group);
 
-  return { group, armPivot, pickaxe, legL, legR };
+  return { group, toolGrip, pickaxe, legL, legR, armL, armR };
 }
 
 // --- Ore reward gem (original low-poly design — a faceted crystal on an icy base) ---------------
@@ -296,14 +319,14 @@ export function createSceneContext(canvas: HTMLCanvasElement, session: BoulderSt
   scene.environment = createEnvironmentMap(renderer);
   scene.environmentIntensity = ENVIRONMENT_INTENSITY;
 
-  const centerZ = (boulderZ(ROUND_COUNT - 1) + standZ(0)) / 2;
+  const fullRangeCenterZ = (boulderZ(ROUND_COUNT - 1) + standZ(0)) / 2;
   const camera = new THREE.PerspectiveCamera(CAMERA_FOV, CANVAS_W / CANVAS_H, 0.1, 120);
-  camera.position.set(0, CAMERA_HEIGHT, centerZ + CAMERA_BACK);
-  camera.lookAt(0, 0, centerZ);
+  camera.position.set(0, CAMERA_HEIGHT, cameraCenterZ(0) + CAMERA_BACK);
+  camera.lookAt(0, 0.6, cameraCenterZ(0));
 
   scene.add(new THREE.AmbientLight(0xffffff, AMBIENT_LIGHT_INTENSITY));
   const keyLight = new THREE.DirectionalLight(0xfff2df, KEY_LIGHT_INTENSITY);
-  keyLight.position.set(6, 22, centerZ + 10);
+  keyLight.position.set(6, 22, fullRangeCenterZ + 10);
   keyLight.castShadow = SHADOWS_ENABLED;
   if (SHADOWS_ENABLED) {
     keyLight.shadow.mapSize.set(2048, 2048);
@@ -351,10 +374,6 @@ export function createSceneContext(canvas: HTMLCanvasElement, session: BoulderSt
 
 // --- Per-frame updates -------------------------------------------------------------------------
 
-const ARM_REST_X = 0.35;
-const ARM_RAISED_X = -1.5;
-const ARM_SWING_X = 1.7;
-
 function updatePickaxeGleam(pickaxe: PickaxeRig, combo: GleamCombo | null): void {
   const comboId = combo ? combo.id : null;
   if (pickaxe.paintedComboId === comboId) return;
@@ -389,19 +408,32 @@ function updateCharacters(ctx: SceneContext, session: BoulderStrikeSession, now:
     rig.legL.rotation.x = legSwing;
     rig.legR.rotation.x = -legSwing;
 
-    // Arm/pickaxe pose.
-    let armX = ARM_REST_X;
+    // Pickaxe pose: rest (hanging), raised (pulled back overhead, both arms up — a real windup,
+    // not a one-armed half-raise), or swing (whipped forward onto the boulder). Position AND
+    // rotation both move between poses so "raised" genuinely reads as pulled back over the
+    // shoulder rather than just tilted.
+    let toolRotX = TOOL_REST_ROT_X;
+    let toolY = TOOL_REST_POS.y;
+    let toolZ = TOOL_REST_POS.z;
     if (session.phase === "RAISE" || session.phase === "GLEAMING") {
-      armX = ARM_RAISED_X;
+      toolRotX = TOOL_RAISED_ROT_X;
+      toolY = TOOL_RAISED_POS.y;
+      toolZ = TOOL_RAISED_POS.z;
     } else if (session.phase === "REVEAL") {
       const t = clamp01((now - session.phaseStartedAt) / (REVEAL_HOLD_MS * 0.4));
       if (releasedAt !== null) {
-        armX = lerp(ARM_RAISED_X, ARM_SWING_X, Math.min(1, t * 1.4));
-      } else {
-        armX = ARM_REST_X; // never even raised — no swing at all
-      }
+        const st = Math.min(1, t * 1.4);
+        toolRotX = lerp(TOOL_RAISED_ROT_X, TOOL_SWING_ROT_X, st);
+        toolY = lerp(TOOL_RAISED_POS.y, TOOL_SWING_POS.y, st);
+        toolZ = lerp(TOOL_RAISED_POS.z, TOOL_SWING_POS.z, st);
+      } // else: never even raised — stays at rest, no swing at all
     }
-    rig.armPivot.rotation.x = armX;
+    rig.toolGrip.position.y = toolY;
+    rig.toolGrip.position.z = toolZ;
+    rig.toolGrip.rotation.x = toolRotX;
+    const armFollow = (toolRotX - TOOL_REST_ROT_X) * ARM_RAISE_FOLLOW;
+    rig.armL.rotation.x = armFollow;
+    rig.armR.rotation.x = armFollow;
 
     updatePickaxeGleam(rig.pickaxe, active ? active.combo : null);
     void result;
@@ -467,9 +499,22 @@ function updateOrePopups(ctx: SceneContext, now: number): void {
   }
 }
 
+function updateCamera(ctx: SceneContext, session: BoulderStrikeSession, now: number): void {
+  const roundIndex = session.round.roundIndex;
+  let centerZ = cameraCenterZ(roundIndex);
+  if (session.phase === "WALK") {
+    const t = clamp01((now - session.phaseStartedAt) / WALK_DURATION_MS);
+    const nextIndex = Math.min(roundIndex + 1, ROUND_COUNT - 1);
+    centerZ = lerp(cameraCenterZ(roundIndex), cameraCenterZ(nextIndex), t);
+  }
+  ctx.camera.position.set(0, CAMERA_HEIGHT, centerZ + CAMERA_BACK);
+  ctx.camera.lookAt(0, 0.6, centerZ);
+}
+
 /** Re-derives every visible fact from session/now on every call — ctx's meshes are purely a
  * create-once/mutate-in-place cache. */
 export function renderBoulderScene(ctx: SceneContext, session: BoulderStrikeSession, now: number): void {
+  updateCamera(ctx, session, now);
   if (session.phase === "REVEAL" && ctx.revealedForRound !== session.round.roundIndex) {
     rebuildOrePopups(ctx, session, now);
     ctx.revealedForRound = session.round.roundIndex;

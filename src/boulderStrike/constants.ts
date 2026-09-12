@@ -73,11 +73,11 @@ export interface RoundConfig {
   gapMs: number;
 }
 export const ROUND_CONFIGS: RoundConfig[] = [
-  { decoyCount: 4, windowMs: 550, gapMs: 250 },
-  { decoyCount: 5, windowMs: 480, gapMs: 220 },
-  { decoyCount: 6, windowMs: 420, gapMs: 200 },
-  { decoyCount: 7, windowMs: 370, gapMs: 180 },
-  { decoyCount: 8, windowMs: 320, gapMs: 160 },
+  { decoyCount: 4, windowMs: 900, gapMs: 500 },
+  { decoyCount: 5, windowMs: 800, gapMs: 450 },
+  { decoyCount: 6, windowMs: 700, gapMs: 400 },
+  { decoyCount: 7, windowMs: 620, gapMs: 350 },
+  { decoyCount: 8, windowMs: 550, gapMs: 300 },
 ];
 
 // --- Phase timing (ms) ------------------------------------------------------------------------
@@ -107,10 +107,26 @@ export const PLAYER_STAND_OFFSET = 1.5; // how far south (camera-side) of the bo
 export const CHARACTER_RADIUS = 0.4;
 export const CHARACTER_HEIGHT = 1.5;
 
-export const CAMERA_FOV = 48;
-export const CAMERA_HEIGHT = 30;
-export const CAMERA_BACK = 9;
+// Lowered from the first pass (height 30 / back 9, ~73deg off horizontal — steep enough that the
+// pickaxe's gleam face, which stands roughly vertical, was seen almost edge-on). This is closer
+// to ~48deg, shallow enough that gleams actually read, while the camera still re-centers on
+// whichever round is currently active (see sceneBuilder.ts) so the current boulder/pickaxes stay
+// framed regardless of how far down the line play has gotten.
+export const CAMERA_FOV = 46;
+export const CAMERA_HEIGHT = 15;
+export const CAMERA_BACK = 17;
 export const AMBIENT_LIGHT_INTENSITY = 1.4;
 export const KEY_LIGHT_INTENSITY = 2.2;
 export const ENVIRONMENT_INTENSITY = 0.55;
 export const SHADOWS_ENABLED = true;
+
+// --- Pickaxe pose (world-ish offsets from the shoulder, world units / radians) ------------------
+// Raised: pulled back and up, over the shoulder, both arms up — a real windup, not a one-armed
+// half-raise. Swing: whips forward and down onto the boulder. Rest: hangs loosely.
+export const TOOL_REST_ROT_X = 2.6;
+export const TOOL_RAISED_ROT_X = -0.55;
+export const TOOL_SWING_ROT_X = 1.85;
+export const TOOL_REST_POS = { y: 0.75, z: 0.18 };
+export const TOOL_RAISED_POS = { y: 1.55, z: 0.4 };
+export const TOOL_SWING_POS = { y: 0.85, z: -0.55 };
+export const ARM_RAISE_FOLLOW = 0.8; // how much the arm stubs mirror the tool's own rotation

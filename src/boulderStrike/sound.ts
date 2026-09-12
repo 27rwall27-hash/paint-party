@@ -30,46 +30,6 @@ function getNoiseBuffer(c: AudioContext): AudioBuffer {
   return noiseBuffer;
 }
 
-/** A short, distinct blip for a decoy gleam — pitch mapped to the shape (4 shapes -> 4 pitches)
- * so, in principle, sound alone hints at what just flashed. */
-export function playDecoyBlip(shapeIndex: number): void {
-  const c = getCtx();
-  if (!master) return;
-  const freq = 340 + shapeIndex * 90;
-  const t0 = c.currentTime;
-  const osc = c.createOscillator();
-  const gain = c.createGain();
-  osc.type = "triangle";
-  osc.frequency.value = freq;
-  gain.gain.setValueAtTime(0, t0);
-  gain.gain.linearRampToValueAtTime(0.14, t0 + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.1);
-  osc.connect(gain).connect(master);
-  osc.start(t0);
-  osc.stop(t0 + 0.12);
-}
-
-/** A brighter, ringing chime — the real target gleam. Deliberately distinct timbre (not just
- * pitch) from the decoy blips so it can be told apart by ear. */
-export function playTargetChime(): void {
-  const c = getCtx();
-  if (!master) return;
-  const t0 = c.currentTime;
-  [880, 1320].forEach((freq, i) => {
-    const start = t0 + i * 0.05;
-    const osc = c.createOscillator();
-    const gain = c.createGain();
-    osc.type = "sine";
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(0.24, start + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.24);
-    osc.connect(gain).connect(master!);
-    osc.start(start);
-    osc.stop(start + 0.26);
-  });
-}
-
 /** A satisfying crack — a successfully shattered boulder. Louder for the human. */
 export function playShatter(isHuman: boolean): void {
   const c = getCtx();
