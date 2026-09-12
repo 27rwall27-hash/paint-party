@@ -108,7 +108,12 @@ export const PRECISION_SKEW_MAX = 4; // high skill: release time skewed hard tow
 export const LANE_SPACING = 2.9;
 export const BOULDER_SPACING = 3.1;
 export const BOULDER_RADIUS = 0.75;
-export const PLAYER_STAND_OFFSET = 1.5; // how far south (camera-side) of the boulder a player stands
+// How far south (camera-side) of the boulder a player stands. At 1.5, the leftover clearance to
+// the NEXT round's boulder once a player finishes walking up to it — offset minus both radii —
+// worked out to only ~0.3 world units, which read as walking straight into it. Widened to 2.0;
+// TOOL_SWING_POS.z below is extended by the same amount so the swing still visibly reaches the
+// player's OWN (closer, not the next) boulder.
+export const PLAYER_STAND_OFFSET = 2.0;
 export const CHARACTER_RADIUS = 0.4;
 export const CHARACTER_HEIGHT = 1.5;
 
@@ -144,7 +149,7 @@ export const TOOL_RAISED_ROT_X = 0.62;
 export const TOOL_SWING_ROT_X = -2.25;
 export const TOOL_REST_POS = { y: 0.75, z: 0.18 };
 export const TOOL_RAISED_POS = { y: 1.55, z: 0.4 };
-export const TOOL_SWING_POS = { y: 0.85, z: -0.55 };
+export const TOOL_SWING_POS = { y: 0.85, z: -1.05 };
 
 // The arm stubs get their own raised/swing targets (rather than tracking a fraction of the tool's
 // rotation delta) because their rest orientation — hanging straight down at rotation 0 — isn't the
@@ -155,6 +160,14 @@ export const TOOL_SWING_POS = { y: 0.85, z: -0.55 };
 export const ARM_REST_ROT_X = 0;
 export const ARM_RAISED_ROT_X = -2.5;
 export const ARM_SWING_ROT_X = 0.9;
+
+// --- char1 (player 0's real model) bone-driven animation ---------------------------------------
+// Additive offsets on top of the model's own bind-pose rotation (never overwrite it outright —
+// the bind pose also encodes axes we're not animating). Scale factors are first-pass guesses,
+// tuned by screenshot since the source rig's local axis conventions aren't something we can read
+// off the file — this is the same "implement, screenshot, correct the sign/axis" loop used to fix
+// the generic rig's own tool rotation above.
+export const MARIO_ARM_SWING_SCALE = 0.7;
 
 // The swing plays immediately off each player's own release timestamp (not gated behind the
 // round's global REVEAL phase), so a fast reflex doesn't have to wait for slower players/CPUs to

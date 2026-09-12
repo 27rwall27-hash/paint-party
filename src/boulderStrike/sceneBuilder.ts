@@ -18,6 +18,7 @@ import {
   ENVIRONMENT_INTENSITY,
   KEY_LIGHT_INTENSITY,
   LANE_SPACING,
+  MARIO_ARM_SWING_SCALE,
   ORE_TIERS,
   PLAYER_COUNT,
   PLAYER_STAND_OFFSET,
@@ -336,41 +337,56 @@ function createPickaxe(): PickaxeRig {
   handle.castShadow = SHADOWS_ENABLED;
   group.add(handle);
 
+  // The head's two points sit in the Y-Z plane (front/back along the handle's own swing arc),
+  // NOT the X plane (left/right) — toolGrip only ever rotates around local X (see updateCharacters),
+  // and a rotation around X does nothing to a point that already lies on the X axis, so points
+  // sticking out sideways just spin in place instead of ever leading into the rock. Points in the
+  // Y-Z plane instead sweep through the exact same arc as the handle, so the front point
+  // genuinely arrives at the boulder at the bottom of the swing, like a real pickaxe.
   const headMat = new THREE.MeshStandardMaterial({ color: 0x9aa1aa, roughness: 0.25, metalness: 0.9 });
-  const headL = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.42, 4), headMat);
-  headL.rotation.z = Math.PI / 2;
-  headL.position.set(-0.2, 0.85, 0);
-  headL.castShadow = SHADOWS_ENABLED;
-  group.add(headL);
-  const headR = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.42, 4), headMat);
-  headR.rotation.z = -Math.PI / 2;
-  headR.position.set(0.2, 0.85, 0);
-  headR.castShadow = SHADOWS_ENABLED;
-  group.add(headR);
+  const headFront = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.42, 4), headMat);
+  headFront.rotation.x = -Math.PI / 2;
+  headFront.position.set(0, 0.85, -0.2);
+  headFront.castShadow = SHADOWS_ENABLED;
+  group.add(headFront);
+  const headBack = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.42, 4), headMat);
+  headBack.rotation.x = Math.PI / 2;
+  headBack.position.set(0, 0.85, 0.2);
+  headBack.castShadow = SHADOWS_ENABLED;
+  group.add(headBack);
 
+  // A single upward-facing plane sitting on top of the head — from the game's elevated,
+  // near-top-down camera this reads far better than a plane facing sideways (nearly edge-on from
+  // that angle). DoubleSide so it stays visible even if the camera ever dips below it mid-swing.
   const gleamCanvas = createGleamCanvas();
   paintGleamCanvas(gleamCanvas, null);
   const gleamTexture = new THREE.CanvasTexture(gleamCanvas);
   const gleamPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.34, 0.34),
+    new THREE.PlaneGeometry(0.44, 0.44),
     new THREE.MeshBasicMaterial({
       map: gleamTexture,
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      side: THREE.DoubleSide,
     }),
   );
-  gleamPlane.position.set(0, 0.85, 0.09);
+  gleamPlane.rotation.x = -Math.PI / 2;
+  gleamPlane.position.set(0, 1.06, 0);
   group.add(gleamPlane);
-  const gleamPlaneBack = gleamPlane.clone();
-  gleamPlaneBack.position.z = -0.09;
-  gleamPlaneBack.rotation.y = Math.PI;
-  group.add(gleamPlaneBack);
 
   return { group, gleamCanvas, gleamTexture, paintedComboId: undefined };
 }
 
 // --- Characters --------------------------------------------------------------------------------
+
+/** Real named bones found on a loaded custom model (see buildCharacter) — captured once per
+ * instance (each clone needs its own bone references) so updateCharacters can add rotation
+ * offsets on top of the model's own bind pose, rather than overwriting it outright. */
+interface CustomModelBones {
+  armR?: THREE.Object3D;
+  armRBase: THREE.Euler;
+}
 
 interface CharacterRig {
   group: THREE.Group;
@@ -380,6 +396,7 @@ interface CharacterRig {
   legR: THREE.Group;
   armL: THREE.Group;
   armR: THREE.Group;
+  customBones?: CustomModelBones;
 }
 
 function buildLimbPivot(color: string | number, length: number, radius: number): THREE.Group {
@@ -407,6 +424,7 @@ function buildCharacter(color: string, customModelTemplate: THREE.Object3D | nul
   let legR: THREE.Group;
   let armL: THREE.Group;
   let armR: THREE.Group;
+  let customBones: CustomModelBones | undefined;
 
   if (customModelTemplate) {
     legL = new THREE.Group();
@@ -414,7 +432,19 @@ function buildCharacter(color: string, customModelTemplate: THREE.Object3D | nul
     armL = new THREE.Group();
     armR = new THREE.Group();
     group.add(legL, legR, armL, armR);
-    group.add(cloneSkinned(customModelTemplate));
+
+    const body = cloneSkinned(customModelTemplate);
+    group.add(body);
+
+    // char1's rip keeps the original game's skeleton naming (Hip_1/LegL_1/ArmR_1/...) — drive the
+    // arm raise/swing straight off the real ArmR_1 bone instead of our synthetic capsule pivots,
+    // so the model's own arm actually moves along with the pickaxe. (LegL_1/LegR_1 exist too but
+    // their bind poses turned out too asymmetric to drive safely — see updateCharacters.)
+    const armRBone = body.getObjectByName("ArmR_1");
+    customBones = {
+      armR: armRBone,
+      armRBase: armRBone ? armRBone.rotation.clone() : new THREE.Euler(),
+    };
   } else {
     legL = buildLimbPivot(color, hipY * 0.85, CHARACTER_RADIUS * 0.24);
     legL.position.set(-CHARACTER_RADIUS * 0.3, hipY, 0);
@@ -457,7 +487,7 @@ function buildCharacter(color: string, customModelTemplate: THREE.Object3D | nul
   const pickaxe = createPickaxe();
   toolGrip.add(pickaxe.group);
 
-  return { group, toolGrip, pickaxe, legL, legR, armL, armR };
+  return { group, toolGrip, pickaxe, legL, legR, armL, armR, customBones };
 }
 
 // --- Ore reward gem (original low-poly design — a faceted crystal on an icy base) ---------------
@@ -723,6 +753,21 @@ function updateCharacters(ctx: SceneContext, session: BoulderStrikeSession, now:
     rig.toolGrip.rotation.x = toolRotX;
     rig.armL.rotation.x = armRotX;
     rig.armR.rotation.x = armRotX;
+
+    // char1 (player 0's real model, when loaded): the pickaxe itself still swings via the
+    // synthetic toolGrip above (already-proven motion, kept as the single source of truth for
+    // where the axe actually is) — this just nudges the model's own leg/arm bones in the same
+    // direction on top of their bind pose, so it visibly walks and raises/swings along with it,
+    // rather than staying frozen in its loaded T-pose the whole game.
+    // Leg bones intentionally NOT driven here: LegL_1's and LegR_1's bind-pose rotations turned
+    // out wildly asymmetric (~0 vs ~180°, not a simple mirror), so the same additive swing put
+    // one leg somewhere sane and the other somewhere the bind pose never anticipated, reading as
+    // both legs bunching up off the ground rather than a stride, on every axis tried. Left at bind
+    // pose rather than shipping that — the body still visibly walks (translates + bobs), just
+    // without leg articulation. The pickaxe-arm swing below doesn't have this problem (ArmR_1's
+    // bind pose is ~0, a normal T-pose extension) so it's still driven.
+    const bones = rig.customBones;
+    if (bones?.armR) bones.armR.rotation.x = bones.armRBase.x + armRotX * MARIO_ARM_SWING_SCALE;
 
     updatePickaxeGleam(rig.pickaxe, active ? active.combo : null);
   });
