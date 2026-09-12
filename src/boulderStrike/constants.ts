@@ -66,18 +66,19 @@ export const ORE_TIERS: OreTier[] = [
 // target's position in the sequence is never fixed, so counting flashes doesn't help — every one
 // has to actually be read). windowMs is how long each gleam stays lit (and, for the target
 // specifically, how long the release window stays valid); gapMs is the dark pause between flashes.
-// Both shrink round to round for escalating difficulty.
+// Both shrink round to round for escalating difficulty. Slowed a second time — even round 1 needs
+// to give a fresh player time to actually register a shape+color before it's gone.
 export interface RoundConfig {
   decoyCount: number;
   windowMs: number;
   gapMs: number;
 }
 export const ROUND_CONFIGS: RoundConfig[] = [
-  { decoyCount: 4, windowMs: 900, gapMs: 500 },
-  { decoyCount: 5, windowMs: 800, gapMs: 450 },
-  { decoyCount: 6, windowMs: 700, gapMs: 400 },
-  { decoyCount: 7, windowMs: 620, gapMs: 350 },
-  { decoyCount: 8, windowMs: 550, gapMs: 300 },
+  { decoyCount: 4, windowMs: 1450, gapMs: 850 },
+  { decoyCount: 5, windowMs: 1250, gapMs: 750 },
+  { decoyCount: 6, windowMs: 1100, gapMs: 650 },
+  { decoyCount: 7, windowMs: 950, gapMs: 550 },
+  { decoyCount: 8, windowMs: 820, gapMs: 470 },
 ];
 
 // --- Phase timing (ms) ------------------------------------------------------------------------
@@ -100,7 +101,11 @@ export const PRECISION_SKEW_MIN = 1; // low skill: release time ~uniform across 
 export const PRECISION_SKEW_MAX = 4; // high skill: release time skewed hard toward instant-0
 
 // --- 3D world layout (world units) -------------------------------------------------------------
-export const LANE_SPACING = 3.4;
+// Narrowed from 3.4 — at the old spacing the outer two lanes (players 0 and 9) fell outside the
+// camera's horizontal field of view entirely, so player 0 (always the human) could be invisible
+// depending on which edge they landed on. Narrower lanes keep all 10 players on screen without
+// having to back the camera off far enough to hurt gleam readability.
+export const LANE_SPACING = 2.9;
 export const BOULDER_SPACING = 3.1;
 export const BOULDER_RADIUS = 0.75;
 export const PLAYER_STAND_OFFSET = 1.5; // how far south (camera-side) of the boulder a player stands
@@ -111,8 +116,9 @@ export const CHARACTER_HEIGHT = 1.5;
 // pickaxe's gleam face, which stands roughly vertical, was seen almost edge-on). This is closer
 // to ~48deg, shallow enough that gleams actually read, while the camera still re-centers on
 // whichever round is currently active (see sceneBuilder.ts) so the current boulder/pickaxes stay
-// framed regardless of how far down the line play has gotten.
-export const CAMERA_FOV = 46;
+// framed regardless of how far down the line play has gotten. FOV also widened alongside the
+// LANE_SPACING narrowing above, to fully close the "can't see player 0" gap.
+export const CAMERA_FOV = 52;
 export const CAMERA_HEIGHT = 15;
 export const CAMERA_BACK = 17;
 export const AMBIENT_LIGHT_INTENSITY = 1.4;
@@ -123,10 +129,39 @@ export const SHADOWS_ENABLED = true;
 // --- Pickaxe pose (world-ish offsets from the shoulder, world units / radians) ------------------
 // Raised: pulled back and up, over the shoulder, both arms up — a real windup, not a one-armed
 // half-raise. Swing: whips forward and down onto the boulder. Rest: hangs loosely.
+//
+// Rotation is around the toolGrip's local X axis, which (given the pickaxe geometry extends
+// along +Y from the grip) sends +Y toward +Z (back, toward the player/camera) for positive
+// angles and toward -Z (forward, toward the boulder) for negative angles. The previous pass had
+// RAISED using a *negative* angle — tilting the head forward, toward the boulder, while the grip
+// position simultaneously moved backward — the two fought each other and read as a limp,
+// horizontal-ish tilt instead of a proper windup. RAISED now uses a positive angle (up and back,
+// agreeing with its backward grip-position offset below); SWING uses a negative angle past
+// vertical (down and forward, agreeing with its forward grip-position offset) so the head
+// visibly arcs up-and-back -> overhead -> down-and-forward into the rock.
 export const TOOL_REST_ROT_X = 2.6;
-export const TOOL_RAISED_ROT_X = -0.55;
-export const TOOL_SWING_ROT_X = 1.85;
+export const TOOL_RAISED_ROT_X = 0.62;
+export const TOOL_SWING_ROT_X = -2.25;
 export const TOOL_REST_POS = { y: 0.75, z: 0.18 };
 export const TOOL_RAISED_POS = { y: 1.55, z: 0.4 };
 export const TOOL_SWING_POS = { y: 0.85, z: -0.55 };
-export const ARM_RAISE_FOLLOW = 0.8; // how much the arm stubs mirror the tool's own rotation
+
+// The arm stubs get their own raised/swing targets (rather than tracking a fraction of the tool's
+// rotation delta) because their rest orientation — hanging straight down at rotation 0 — isn't the
+// same baseline the tool's rest orientation is built from, so a shared delta didn't cover enough
+// angular distance to actually reach "up": it left the arms swung out sideways/backward instead of
+// over the shoulder. These values independently trace the same down -> up-and-back -> down-and-
+// forward arc the tool takes (see the direction-convention note above).
+export const ARM_REST_ROT_X = 0;
+export const ARM_RAISED_ROT_X = -2.5;
+export const ARM_SWING_ROT_X = 0.9;
+
+// The swing plays immediately off each player's own release timestamp (not gated behind the
+// round's global REVEAL phase), so a fast reflex doesn't have to wait for slower players/CPUs to
+// finish out the rest of the gleam sequence before its swing animation even starts.
+export const SWING_DURATION_MS = 260;
+
+// --- Rubble (a successfully-struck boulder crumbles into a small pile, rather than just
+// shrinking away) ---------------------------------------------------------------------------
+export const RUBBLE_CHUNK_COUNT = 7;
+export const RUBBLE_SETTLE_MS = 420;

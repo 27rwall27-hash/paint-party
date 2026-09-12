@@ -3,7 +3,9 @@ import { ColladaLoader } from "three/examples/jsm/loaders/ColladaLoader.js";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import {
   AMBIENT_LIGHT_INTENSITY,
-  ARM_RAISE_FOLLOW,
+  ARM_RAISED_ROT_X,
+  ARM_REST_ROT_X,
+  ARM_SWING_ROT_X,
   BOULDER_RADIUS,
   BOULDER_SPACING,
   CAMERA_BACK,
@@ -21,7 +23,10 @@ import {
   PLAYER_STAND_OFFSET,
   REVEAL_HOLD_MS,
   ROUND_CONFIGS,
+  RUBBLE_CHUNK_COUNT,
+  RUBBLE_SETTLE_MS,
   SHADOWS_ENABLED,
+  SWING_DURATION_MS,
   TOOL_RAISED_POS,
   TOOL_RAISED_ROT_X,
   TOOL_REST_POS,
@@ -224,21 +229,93 @@ function instantiateBoulder(template: THREE.Object3D | null): BoulderInstance {
   return { root, mesh };
 }
 
+// --- Player-0 character model (user-provided .dae + textures, see public/models/char1/) --------
+// Only the human (player 0) gets this model — CPUs keep the generic capsule rig (see
+// buildCharacter) — both so the human stands out at a glance and because attaching a real skinned
+// model to the pickaxe-pose rig for all 10 players would need this model's actual bone names,
+// which we don't have reason to assume beyond a plain standing pose.
+
+const CHAR_MODEL_URL = "/models/char1/mario.dae";
+
+let charTemplatePromise: Promise<THREE.Object3D | null> | null = null;
+
+/** Same auto-fit trick as loadRockTemplate, but fit to CHARACTER_HEIGHT by the model's own height
+ * (not its longest dimension) and feet-aligned to y=0 rather than vertically centered, since this
+ * one needs to stand on the ground next to the generic-rig characters, not float at a boulder's
+ * resting height. */
+function loadCharacterModelTemplate(): Promise<THREE.Object3D | null> {
+  if (!charTemplatePromise) {
+    charTemplatePromise = (async () => {
+      try {
+        const collada = await new ColladaLoader().loadAsync(CHAR_MODEL_URL);
+        const loaded = collada!.scene;
+
+        loaded.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const m of mats) {
+            const std = m as THREE.MeshStandardMaterial;
+            if (std.map) std.map.colorSpace = THREE.SRGBColorSpace;
+          }
+          mesh.castShadow = SHADOWS_ENABLED;
+          mesh.receiveShadow = true;
+        });
+
+        const root = new THREE.Group();
+        root.add(loaded);
+
+        const box = new THREE.Box3().setFromObject(loaded);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        const scale = CHARACTER_HEIGHT / (size.y || 1);
+        root.scale.setScalar(scale);
+        root.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+
+        return root;
+      } catch (err) {
+        console.error("Boulder Strike: failed to load the char1 model — using the generic rig instead.", err);
+        return null;
+      }
+    })();
+  }
+  return charTemplatePromise;
+}
+
 // --- Pickaxe + gleam texture -------------------------------------------------------------------
 
 function createGleamCanvas(): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 64;
+  canvas.width = 96;
+  canvas.height = 96;
   return canvas;
 }
 
+/** Paints a bright glint — a soft colored glow with a hot white core, both shaped per-combo —
+ * on a fully transparent background. Combined with additive blending on the plane material (see
+ * createPickaxe), the dark/transparent background vanishes entirely and only the glow itself
+ * shows, reading as a shine reflecting off the pickaxe's metal head rather than a flat sticker. */
 function paintGleamCanvas(canvas: HTMLCanvasElement, combo: GleamCombo | null): void {
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#1c1712";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (combo) drawGleamShape(ctx, combo.shape, canvas.width / 2, canvas.height / 2, canvas.width * 0.36, combo.color.hex);
+  if (!combo) return;
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+
+  ctx.save();
+  ctx.shadowColor = combo.color.hex;
+  ctx.shadowBlur = canvas.width * 0.32;
+  drawGleamShape(ctx, combo.shape, cx, cy, canvas.width * 0.3, combo.color.hex);
+  drawGleamShape(ctx, combo.shape, cx, cy, canvas.width * 0.3, combo.color.hex);
+  ctx.restore();
+
+  ctx.save();
+  ctx.shadowColor = "#ffffff";
+  ctx.shadowBlur = canvas.width * 0.16;
+  drawGleamShape(ctx, combo.shape, cx, cy, canvas.width * 0.14, "#ffffff");
+  ctx.restore();
 }
 
 interface PickaxeRig {
@@ -259,7 +336,7 @@ function createPickaxe(): PickaxeRig {
   handle.castShadow = SHADOWS_ENABLED;
   group.add(handle);
 
-  const headMat = new THREE.MeshStandardMaterial({ color: 0x4a4a52, roughness: 0.5, metalness: 0.55 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0x9aa1aa, roughness: 0.25, metalness: 0.9 });
   const headL = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.42, 4), headMat);
   headL.rotation.z = Math.PI / 2;
   headL.position.set(-0.2, 0.85, 0);
@@ -275,8 +352,13 @@ function createPickaxe(): PickaxeRig {
   paintGleamCanvas(gleamCanvas, null);
   const gleamTexture = new THREE.CanvasTexture(gleamCanvas);
   const gleamPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.22, 0.22),
-    new THREE.MeshBasicMaterial({ map: gleamTexture }),
+    new THREE.PlaneGeometry(0.34, 0.34),
+    new THREE.MeshBasicMaterial({
+      map: gleamTexture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
   );
   gleamPlane.position.set(0, 0.85, 0.09);
   group.add(gleamPlane);
@@ -312,43 +394,61 @@ function buildLimbPivot(color: string | number, length: number, radius: number):
   return pivot;
 }
 
-function buildCharacter(color: string): CharacterRig {
+/** `customModelTemplate` swaps the generic capsule body/head/legs/arms for a real loaded model
+ * (used for player 0 only, see loadCharacterModelTemplate) — the leg/arm pivots still get built
+ * as bare, mesh-less groups in that case so updateCharacters' walk/pose code has somewhere
+ * harmless to write rotations into, without needing to special-case the update loop itself. */
+function buildCharacter(color: string, customModelTemplate: THREE.Object3D | null): CharacterRig {
   const group = new THREE.Group();
   const hipY = CHARACTER_HEIGHT * 0.46;
   const shoulderY = CHARACTER_HEIGHT * 0.82;
 
-  const legL = buildLimbPivot(color, hipY * 0.85, CHARACTER_RADIUS * 0.24);
-  legL.position.set(-CHARACTER_RADIUS * 0.3, hipY, 0);
-  group.add(legL);
-  const legR = buildLimbPivot(color, hipY * 0.85, CHARACTER_RADIUS * 0.24);
-  legR.position.set(CHARACTER_RADIUS * 0.3, hipY, 0);
-  group.add(legR);
+  let legL: THREE.Group;
+  let legR: THREE.Group;
+  let armL: THREE.Group;
+  let armR: THREE.Group;
 
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(CHARACTER_RADIUS * 0.8, shoulderY - hipY, 6, 14),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.55 }),
-  );
-  body.position.y = (hipY + shoulderY) / 2;
-  body.castShadow = SHADOWS_ENABLED;
-  group.add(body);
+  if (customModelTemplate) {
+    legL = new THREE.Group();
+    legR = new THREE.Group();
+    armL = new THREE.Group();
+    armR = new THREE.Group();
+    group.add(legL, legR, armL, armR);
+    group.add(cloneSkinned(customModelTemplate));
+  } else {
+    legL = buildLimbPivot(color, hipY * 0.85, CHARACTER_RADIUS * 0.24);
+    legL.position.set(-CHARACTER_RADIUS * 0.3, hipY, 0);
+    group.add(legL);
+    legR = buildLimbPivot(color, hipY * 0.85, CHARACTER_RADIUS * 0.24);
+    legR.position.set(CHARACTER_RADIUS * 0.3, hipY, 0);
+    group.add(legR);
 
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(CHARACTER_RADIUS * 0.62, 16, 12),
-    new THREE.MeshStandardMaterial({ color: 0xe8c39e, roughness: 0.7 }),
-  );
-  head.position.y = shoulderY + CHARACTER_RADIUS * 0.75;
-  head.castShadow = SHADOWS_ENABLED;
-  group.add(head);
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(CHARACTER_RADIUS * 0.8, shoulderY - hipY, 6, 14),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.55 }),
+    );
+    body.position.y = (hipY + shoulderY) / 2;
+    body.castShadow = SHADOWS_ENABLED;
+    group.add(body);
 
-  // Both arms flank the tool grip and mirror its rotation (see updateCharacters), so a raised
-  // pickaxe genuinely reads as a two-handed grip pulled back over the shoulder, not a one-armed
-  // half-raise.
-  const armL = buildLimbPivot(color, (shoulderY - hipY) * 0.75, CHARACTER_RADIUS * 0.18);
-  armL.position.set(-CHARACTER_RADIUS * 0.68, shoulderY + 0.1, 0);
-  group.add(armL);
-  const armR = buildLimbPivot(color, (shoulderY - hipY) * 0.75, CHARACTER_RADIUS * 0.18);
-  armR.position.set(CHARACTER_RADIUS * 0.68, shoulderY + 0.1, 0);
-  group.add(armR);
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(CHARACTER_RADIUS * 0.62, 16, 12),
+      new THREE.MeshStandardMaterial({ color: 0xe8c39e, roughness: 0.7 }),
+    );
+    head.position.y = shoulderY + CHARACTER_RADIUS * 0.75;
+    head.castShadow = SHADOWS_ENABLED;
+    group.add(head);
+
+    // Both arms flank the tool grip and mirror its rotation (see updateCharacters), so a raised
+    // pickaxe genuinely reads as a two-handed grip pulled back over the shoulder, not a one-armed
+    // half-raise.
+    armL = buildLimbPivot(color, (shoulderY - hipY) * 0.75, CHARACTER_RADIUS * 0.18);
+    armL.position.set(-CHARACTER_RADIUS * 0.68, shoulderY + 0.1, 0);
+    group.add(armL);
+    armR = buildLimbPivot(color, (shoulderY - hipY) * 0.75, CHARACTER_RADIUS * 0.18);
+    armR.position.set(CHARACTER_RADIUS * 0.68, shoulderY + 0.1, 0);
+    group.add(armR);
+  }
 
   const toolGrip = new THREE.Group();
   toolGrip.position.set(0, shoulderY, 0);
@@ -393,6 +493,85 @@ function createOreGemMesh(color: string): THREE.Group {
   return group;
 }
 
+// --- Rubble (a successfully-struck boulder crumbles into a small pile on the ground, instead of
+// just shrinking away to nothing) ----------------------------------------------------------------
+
+interface RubbleTransform {
+  pos: THREE.Vector3;
+  rot: THREE.Euler;
+}
+
+interface RubblePile {
+  group: THREE.Group;
+  chunks: THREE.Mesh[];
+  burstTransforms: RubbleTransform[];
+  settleTransforms: RubbleTransform[];
+}
+
+let rubbleGeometry: THREE.BufferGeometry | null = null;
+let rubbleMaterial: THREE.MeshStandardMaterial | null = null;
+function getRubbleGeometry(): THREE.BufferGeometry {
+  if (!rubbleGeometry) rubbleGeometry = new THREE.IcosahedronGeometry(0.11, 0);
+  return rubbleGeometry;
+}
+function getRubbleMaterial(): THREE.MeshStandardMaterial {
+  if (!rubbleMaterial) rubbleMaterial = new THREE.MeshStandardMaterial({ color: 0x6e6255, roughness: 0.95 });
+  return rubbleMaterial;
+}
+
+/** Builds one (initially hidden) rubble pile — every chunk starts at a "burst" transform
+ * (scattered outward and slightly airborne) and eases into its final "settle" transform (a small
+ * flat pile) the moment its boulder is struck; see showRubble. Geometry and material are shared
+ * across every pile in the game (50 of them) since chunks are never individually recolored. */
+function createRubblePile(): RubblePile {
+  const group = new THREE.Group();
+  group.visible = false;
+  const chunks: THREE.Mesh[] = [];
+  const burstTransforms: RubbleTransform[] = [];
+  const settleTransforms: RubbleTransform[] = [];
+  const geometry = getRubbleGeometry();
+  const material = getRubbleMaterial();
+
+  for (let i = 0; i < RUBBLE_CHUNK_COUNT; i++) {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = SHADOWS_ENABLED;
+    mesh.receiveShadow = true;
+
+    const angle = (i / RUBBLE_CHUNK_COUNT) * Math.PI * 2 + Math.random() * 0.6;
+    const settleRadius = 0.15 + Math.random() * 0.16;
+    const settlePos = new THREE.Vector3(Math.cos(angle) * settleRadius, 0.05 + Math.random() * 0.04, Math.sin(angle) * settleRadius);
+    const settleRot = new THREE.Euler(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    const burstPos = new THREE.Vector3(Math.cos(angle) * settleRadius * 2.6, 0.45 + Math.random() * 0.3, Math.sin(angle) * settleRadius * 2.6);
+    const burstRot = new THREE.Euler(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random() * Math.PI * 2);
+
+    mesh.position.copy(burstPos);
+    mesh.rotation.copy(burstRot);
+    group.add(mesh);
+    chunks.push(mesh);
+    burstTransforms.push({ pos: burstPos, rot: burstRot });
+    settleTransforms.push({ pos: settlePos, rot: settleRot });
+  }
+
+  return { group, chunks, burstTransforms, settleTransforms };
+}
+
+/** t=0 -> just struck (chunks at their scattered burst pose), t=1 -> fully settled pile. */
+function showRubble(rubble: RubblePile, t: number): void {
+  rubble.group.visible = true;
+  const eased = 1 - Math.pow(1 - t, 3);
+  rubble.chunks.forEach((chunk, i) => {
+    const start = rubble.burstTransforms[i]!;
+    const end = rubble.settleTransforms[i]!;
+    chunk.position.lerpVectors(start.pos, end.pos, eased);
+    chunk.rotation.set(
+      lerp(start.rot.x, end.rot.x, eased),
+      lerp(start.rot.y, end.rot.y, eased),
+      lerp(start.rot.z, end.rot.z, eased),
+    );
+    chunk.scale.setScalar(lerp(0.55, 1, Math.min(1, eased * 1.4)));
+  });
+}
+
 // --- Scene context ------------------------------------------------------------------------------
 
 interface OrePopup {
@@ -406,7 +585,7 @@ export interface SceneContext {
   camera: THREE.PerspectiveCamera;
   characters: CharacterRig[];
   boulders: BoulderInstance[][]; // [playerId][roundIndex]
-  boulderHidden: boolean[][];
+  rubble: RubblePile[][]; // [playerId][roundIndex]
   orePopupGroup: THREE.Group;
   orePopups: OrePopup[];
   revealedForRound: number;
@@ -447,25 +626,29 @@ export async function createSceneContext(canvas: HTMLCanvasElement, session: Bou
 
   buildGround(scene);
 
-  const rockTemplate = await loadRockTemplate();
+  const [rockTemplate, charTemplate] = await Promise.all([loadRockTemplate(), loadCharacterModelTemplate()]);
   const boulders: BoulderInstance[][] = [];
-  const boulderHidden: boolean[][] = [];
+  const rubble: RubblePile[][] = [];
   for (let playerId = 0; playerId < PLAYER_COUNT; playerId++) {
     const row: BoulderInstance[] = [];
-    const hiddenRow: boolean[] = [];
+    const rubbleRow: RubblePile[] = [];
     for (let roundIndex = 0; roundIndex < ROUND_COUNT; roundIndex++) {
       const boulder = instantiateBoulder(rockTemplate);
       boulder.root.position.set(laneX(playerId), BOULDER_RADIUS * 0.6, boulderZ(roundIndex));
       scene.add(boulder.root);
       row.push(boulder);
-      hiddenRow.push(false);
+
+      const pile = createRubblePile();
+      pile.group.position.set(laneX(playerId), BOULDER_RADIUS * 0.2, boulderZ(roundIndex));
+      scene.add(pile.group);
+      rubbleRow.push(pile);
     }
     boulders.push(row);
-    boulderHidden.push(hiddenRow);
+    rubble.push(rubbleRow);
   }
 
   const characters = session.identities.map((identity) => {
-    const rig = buildCharacter(identity.color);
+    const rig = buildCharacter(identity.color, identity.id === 0 ? charTemplate : null);
     rig.group.position.set(laneX(identity.id), 0, standZ(0));
     scene.add(rig.group);
     return rig;
@@ -474,7 +657,7 @@ export async function createSceneContext(canvas: HTMLCanvasElement, session: Bou
   const orePopupGroup = new THREE.Group();
   scene.add(orePopupGroup);
 
-  return { renderer, scene, camera, characters, boulders, boulderHidden, orePopupGroup, orePopups: [], revealedForRound: -1 };
+  return { renderer, scene, camera, characters, boulders, rubble, orePopupGroup, orePopups: [], revealedForRound: -1 };
 }
 
 // --- Per-frame updates -------------------------------------------------------------------------
@@ -493,7 +676,6 @@ function updateCharacters(ctx: SceneContext, session: BoulderStrikeSession, now:
 
   session.identities.forEach((_identity, playerId) => {
     const rig = ctx.characters[playerId]!;
-    const result = round.playerResult[playerId];
     const releasedAt = round.playerReleasedAt[playerId];
 
     // Position: standing still except during WALK, when everyone steps forward to the next rock.
@@ -516,70 +698,79 @@ function updateCharacters(ctx: SceneContext, session: BoulderStrikeSession, now:
     // Pickaxe pose: rest (hanging), raised (pulled back overhead, both arms up — a real windup,
     // not a one-armed half-raise), or swing (whipped forward onto the boulder). Position AND
     // rotation both move between poses so "raised" genuinely reads as pulled back over the
-    // shoulder rather than just tilted.
+    // shoulder rather than just tilted. The swing plays off the player's own release timestamp,
+    // not the round's global phase — so it fires the instant the mouse comes up, whether that's
+    // mid-GLEAMING (a fast correct release) or later, rather than waiting for every other player
+    // to finish out the round first.
     let toolRotX = TOOL_REST_ROT_X;
     let toolY = TOOL_REST_POS.y;
     let toolZ = TOOL_REST_POS.z;
-    if (session.phase === "RAISE" || session.phase === "GLEAMING") {
+    let armRotX = ARM_REST_ROT_X;
+    if (releasedAt !== null) {
+      const t = clamp01((now - releasedAt) / SWING_DURATION_MS);
+      toolRotX = lerp(TOOL_RAISED_ROT_X, TOOL_SWING_ROT_X, t);
+      toolY = lerp(TOOL_RAISED_POS.y, TOOL_SWING_POS.y, t);
+      toolZ = lerp(TOOL_RAISED_POS.z, TOOL_SWING_POS.z, t);
+      armRotX = lerp(ARM_RAISED_ROT_X, ARM_SWING_ROT_X, t);
+    } else if (session.phase === "RAISE" || session.phase === "GLEAMING") {
       toolRotX = TOOL_RAISED_ROT_X;
       toolY = TOOL_RAISED_POS.y;
       toolZ = TOOL_RAISED_POS.z;
-    } else if (session.phase === "REVEAL") {
-      const t = clamp01((now - session.phaseStartedAt) / (REVEAL_HOLD_MS * 0.4));
-      if (releasedAt !== null) {
-        const st = Math.min(1, t * 1.4);
-        toolRotX = lerp(TOOL_RAISED_ROT_X, TOOL_SWING_ROT_X, st);
-        toolY = lerp(TOOL_RAISED_POS.y, TOOL_SWING_POS.y, st);
-        toolZ = lerp(TOOL_RAISED_POS.z, TOOL_SWING_POS.z, st);
-      } // else: never even raised — stays at rest, no swing at all
+      armRotX = ARM_RAISED_ROT_X;
     }
     rig.toolGrip.position.y = toolY;
     rig.toolGrip.position.z = toolZ;
     rig.toolGrip.rotation.x = toolRotX;
-    const armFollow = (toolRotX - TOOL_REST_ROT_X) * ARM_RAISE_FOLLOW;
-    rig.armL.rotation.x = armFollow;
-    rig.armR.rotation.x = armFollow;
+    rig.armL.rotation.x = armRotX;
+    rig.armR.rotation.x = armRotX;
 
     updatePickaxeGleam(rig.pickaxe, active ? active.combo : null);
-    void result;
   });
 }
 
+/** A correct release crumbles its boulder into a rubble pile the moment the swing lands
+ * (SWING_DURATION_MS after release), independent of every other player — fast reflexes get
+ * immediate payoff instead of waiting for the round to end. A miss (or never releasing at all)
+ * leaves the boulder intact until the whole round wraps up, then fades it away, matching "any
+ * rocks not shattered disappear at round end." Ore rewards are a separate, later step (see
+ * rebuildOrePopups, gated on the REVEAL phase) — everyone's chance has to be over first. */
 function updateBoulders(ctx: SceneContext, session: BoulderStrikeSession, now: number): void {
   const round = session.round;
+  const roundIndex = round.roundIndex;
   const revealElapsed = session.phase === "REVEAL" ? now - session.phaseStartedAt : session.phase === "SCORED" || session.phase === "WALK" ? REVEAL_HOLD_MS : -1;
 
   for (let playerId = 0; playerId < PLAYER_COUNT; playerId++) {
-    const boulder = ctx.boulders[playerId]![round.roundIndex]!;
+    const boulder = ctx.boulders[playerId]![roundIndex]!;
+    const rubble = ctx.rubble[playerId]![roundIndex]!;
     const { root, mesh } = boulder;
-    if (ctx.boulderHidden[playerId]![round.roundIndex]) {
+    const result = round.playerResult[playerId];
+    const releasedAt = round.playerReleasedAt[playerId];
+
+    if (result === "success" && releasedAt !== null) {
+      const impactAt = releasedAt + SWING_DURATION_MS;
+      if (now < impactAt) {
+        root.visible = true;
+        root.scale.setScalar(root.userData.baseScale ?? (root.userData.baseScale = root.scale.x));
+        rubble.group.visible = false;
+        continue;
+      }
       root.visible = false;
+      showRubble(rubble, clamp01((now - impactAt) / RUBBLE_SETTLE_MS));
       continue;
     }
+
+    // Fail or never-attempted: stays intact until the whole round is over, then fades away.
+    rubble.group.visible = false;
     if (revealElapsed < 0) {
       root.visible = true;
       root.scale.setScalar(root.userData.baseScale ?? (root.userData.baseScale = root.scale.x));
       continue;
     }
-    const success = round.playerResult[playerId] === "success";
     const t = clamp01(revealElapsed / (REVEAL_HOLD_MS * 0.6));
-    const baseScale: number = root.userData.baseScale ?? root.scale.x;
-    if (success) {
-      root.scale.setScalar(Math.max(0, baseScale * (1 - t * 1.3)));
-      root.rotation.y += 0.25;
-      if (t >= 1) {
-        root.visible = false;
-        ctx.boulderHidden[playerId]![round.roundIndex] = true;
-      }
-    } else {
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      mat.transparent = true;
-      mat.opacity = 1 - t;
-      if (t >= 1) {
-        root.visible = false;
-        ctx.boulderHidden[playerId]![round.roundIndex] = true;
-      }
-    }
+    const mat = mesh.material as THREE.MeshStandardMaterial;
+    mat.transparent = true;
+    mat.opacity = 1 - t;
+    root.visible = t < 1;
   }
 }
 
