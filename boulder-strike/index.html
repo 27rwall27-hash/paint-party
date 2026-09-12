@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Boulder Strike</title>
+  </head>
+  <body>
+    <div id="app">
+      <a id="backToSuite" href="/">&larr; Suite</a>
+      <div id="hud"></div>
+      <div class="sceneWrap">
+        <canvas id="boulderScene" width="1400" height="1000"></canvas>
+        <div id="banner" hidden>
+          <canvas id="previewIcon" width="64" height="64" hidden></canvas>
+          <div class="bannerTitle"></div>
+          <div class="bannerSub"></div>
+        </div>
+      </div>
+
+      <div id="setupPanel">
+        <p class="settingsHint">
+          10 players, 5 rounds. Each round, before the rocks are struck, you'll see the exact
+          gleam to watch for. Hold the mouse button down to raise your pickaxe, then release the
+          instant that gleam flashes on it. Every pickaxe flashes the same sequence of shapes and
+          colors at once — some real, most decoys — and the target's spot in the sequence changes
+          every round, so you actually have to watch. Release at the wrong moment (or never
+          release at all) and your rock stays standing. The 4 fastest correct swings earn Gold,
+          Silver, Bronze, and Verdite ore.
+        </p>
+        <div class="settingsRow">
+          <input id="playerNameInput" type="text" maxlength="12" placeholder="You" />
+        </div>
+        <div id="playerColorPicker"></div>
+        <div class="settingsRow">
+          <button id="startBtn" type="button">Start</button>
+        </div>
+      </div>
+      <button id="playAgainBtn" type="button" hidden>Play Again</button>
+    </div>
+    <script type="module" src="/src/boulderStrike/main.ts"></script>
+  </body>
+</html>
