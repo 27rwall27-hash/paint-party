@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { ColladaLoader } from "three/examples/jsm/loaders/ColladaLoader.js";
+import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import {
   AMBIENT_LIGHT_INTENSITY,
   ARM_RAISE_FOLLOW,
@@ -106,7 +108,17 @@ function buildGround(scene: THREE.Scene): void {
   scene.add(ground);
 }
 
-function createBoulderMesh(): THREE.Mesh {
+/** A boulder is a small wrapper (`root`, what gets positioned/scaled/rotated/hidden) around
+ * whichever mesh actually carries the material (`mesh`, what the shatter/fade animation tweaks
+ * opacity on) — kept separate because the loaded rock model nests its real mesh a couple of
+ * levels deep inside its own scene-graph transforms, which we don't want to fight against by
+ * scaling/rotating it directly. */
+interface BoulderInstance {
+  root: THREE.Object3D;
+  mesh: THREE.Mesh;
+}
+
+function createProceduralBoulder(): BoulderInstance {
   const geo = new THREE.IcosahedronGeometry(BOULDER_RADIUS, 1);
   const pos = geo.attributes.position!;
   for (let i = 0; i < pos.count; i++) {
@@ -117,7 +129,99 @@ function createBoulderMesh(): THREE.Mesh {
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x5c5248, roughness: 0.92 }));
   mesh.castShadow = SHADOWS_ENABLED;
   mesh.receiveShadow = true;
-  return mesh;
+  return { root: mesh, mesh };
+}
+
+// --- Rock model (user-provided .dae + textures, see public/models/rock/) -------------------------
+
+const ROCK_MODEL_URL = "/models/rock/Item_Ore_H.dae";
+const ROCK_ALBEDO_URL = "/models/rock/item_ore_h_alb.png";
+const ROCK_NORMAL_URL = "/models/rock/item_ore_h_nrm.png";
+const ROCK_SPEC_URL = "/models/rock/item_ore_h_spm.png";
+
+let rockTemplatePromise: Promise<THREE.Object3D | null> | null = null;
+
+/** Loads the rock model once (cached across the whole game) and auto-fits it: centered at its own
+ * origin and scaled so its longest dimension matches BOULDER_RADIUS*2, regardless of whatever
+ * arbitrary unit scale the source file was authored in — so there's nothing to hand-tune if the
+ * model gets swapped out later. Falls back to null (triggering the old procedural boulder) if the
+ * model or its textures fail to load, rather than breaking the game. */
+function loadRockTemplate(): Promise<THREE.Object3D | null> {
+  if (!rockTemplatePromise) {
+    rockTemplatePromise = (async () => {
+      try {
+        const collada = await new ColladaLoader().loadAsync(ROCK_MODEL_URL);
+        const loaded = collada!.scene;
+
+        // ColladaLoader already bakes the file's declared unit-to-meter conversion into `loaded`'s
+        // own transform, so the box below is measured in real-world-ish units. Applying our own
+        // fit scale/position directly onto `loaded` would OVERWRITE that baked-in transform instead
+        // of composing with it (THREE.Object3D.scale/position are absolute, not relative), throwing
+        // the result off by whatever factor the source unit conversion was. Wrapping it in a fresh,
+        // still-identity group and fitting the wrapper instead sidesteps that entirely.
+        const root = new THREE.Group();
+        root.add(loaded);
+
+        const box = new THREE.Box3().setFromObject(loaded);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        const maxDim = Math.max(size.x, size.y, size.z) || 1;
+        const scale = (BOULDER_RADIUS * 2) / maxDim;
+        root.scale.setScalar(scale);
+        root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+
+        const textureLoader = new THREE.TextureLoader();
+        const [albedo, normal, spec] = await Promise.all([
+          textureLoader.loadAsync(ROCK_ALBEDO_URL),
+          textureLoader.loadAsync(ROCK_NORMAL_URL),
+          textureLoader.loadAsync(ROCK_SPEC_URL),
+        ]);
+        albedo.colorSpace = THREE.SRGBColorSpace;
+
+        root.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          mesh.material = new THREE.MeshStandardMaterial({
+            map: albedo,
+            normalMap: normal,
+            roughnessMap: spec,
+            roughness: 0.85,
+            metalness: 0.05,
+          });
+          mesh.castShadow = SHADOWS_ENABLED;
+          mesh.receiveShadow = true;
+        });
+
+        return root;
+      } catch (err) {
+        console.error("Boulder Strike: failed to load the rock model — using the procedural fallback instead.", err);
+        return null;
+      }
+    })();
+  }
+  return rockTemplatePromise;
+}
+
+function instantiateBoulder(template: THREE.Object3D | null): BoulderInstance {
+  if (!template) return createProceduralBoulder();
+  const root = cloneSkinned(template);
+  let mesh: THREE.Mesh | null = null;
+  root.traverse((obj) => {
+    const m = obj as THREE.Mesh;
+    if (m.isMesh && !mesh) {
+      m.material = (m.material as THREE.MeshStandardMaterial).clone();
+      mesh = m;
+    }
+  });
+  if (!mesh) return createProceduralBoulder();
+  // A little per-instance variety so 50 clones of the same low-poly rock don't read as obviously
+  // identical, the way the old randomized-icosahedron boulders naturally varied.
+  root.rotation.y = Math.random() * Math.PI * 2;
+  const jitter = 0.88 + Math.random() * 0.24;
+  root.scale.multiplyScalar(jitter);
+  return { root, mesh };
 }
 
 // --- Pickaxe + gleam texture -------------------------------------------------------------------
@@ -301,14 +405,14 @@ export interface SceneContext {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   characters: CharacterRig[];
-  boulders: THREE.Mesh[][]; // [playerId][roundIndex]
+  boulders: BoulderInstance[][]; // [playerId][roundIndex]
   boulderHidden: boolean[][];
   orePopupGroup: THREE.Group;
   orePopups: OrePopup[];
   revealedForRound: number;
 }
 
-export function createSceneContext(canvas: HTMLCanvasElement, session: BoulderStrikeSession): SceneContext {
+export async function createSceneContext(canvas: HTMLCanvasElement, session: BoulderStrikeSession): Promise<SceneContext> {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setSize(CANVAS_W, CANVAS_H, false);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -343,15 +447,16 @@ export function createSceneContext(canvas: HTMLCanvasElement, session: BoulderSt
 
   buildGround(scene);
 
-  const boulders: THREE.Mesh[][] = [];
+  const rockTemplate = await loadRockTemplate();
+  const boulders: BoulderInstance[][] = [];
   const boulderHidden: boolean[][] = [];
   for (let playerId = 0; playerId < PLAYER_COUNT; playerId++) {
-    const row: THREE.Mesh[] = [];
+    const row: BoulderInstance[] = [];
     const hiddenRow: boolean[] = [];
     for (let roundIndex = 0; roundIndex < ROUND_COUNT; roundIndex++) {
-      const boulder = createBoulderMesh();
-      boulder.position.set(laneX(playerId), BOULDER_RADIUS * 0.6, boulderZ(roundIndex));
-      scene.add(boulder);
+      const boulder = instantiateBoulder(rockTemplate);
+      boulder.root.position.set(laneX(playerId), BOULDER_RADIUS * 0.6, boulderZ(roundIndex));
+      scene.add(boulder.root);
       row.push(boulder);
       hiddenRow.push(false);
     }
@@ -446,30 +551,32 @@ function updateBoulders(ctx: SceneContext, session: BoulderStrikeSession, now: n
 
   for (let playerId = 0; playerId < PLAYER_COUNT; playerId++) {
     const boulder = ctx.boulders[playerId]![round.roundIndex]!;
+    const { root, mesh } = boulder;
     if (ctx.boulderHidden[playerId]![round.roundIndex]) {
-      boulder.visible = false;
+      root.visible = false;
       continue;
     }
     if (revealElapsed < 0) {
-      boulder.visible = true;
-      boulder.scale.setScalar(1);
+      root.visible = true;
+      root.scale.setScalar(root.userData.baseScale ?? (root.userData.baseScale = root.scale.x));
       continue;
     }
     const success = round.playerResult[playerId] === "success";
     const t = clamp01(revealElapsed / (REVEAL_HOLD_MS * 0.6));
+    const baseScale: number = root.userData.baseScale ?? root.scale.x;
     if (success) {
-      boulder.scale.setScalar(Math.max(0, 1 - t * 1.3));
-      boulder.rotation.y += 0.25;
+      root.scale.setScalar(Math.max(0, baseScale * (1 - t * 1.3)));
+      root.rotation.y += 0.25;
       if (t >= 1) {
-        boulder.visible = false;
+        root.visible = false;
         ctx.boulderHidden[playerId]![round.roundIndex] = true;
       }
     } else {
-      const mat = boulder.material as THREE.MeshStandardMaterial;
+      const mat = mesh.material as THREE.MeshStandardMaterial;
       mat.transparent = true;
       mat.opacity = 1 - t;
       if (t >= 1) {
-        boulder.visible = false;
+        root.visible = false;
         ctx.boulderHidden[playerId]![round.roundIndex] = true;
       }
     }

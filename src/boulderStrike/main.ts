@@ -34,14 +34,22 @@ window.addEventListener("pointerup", () => {
 });
 
 startBtn.addEventListener("click", () => {
+  void startGame();
+});
+
+async function startGame(): Promise<void> {
+  if (startBtn.disabled) return; // guard against a double-click racing the model load
+  startBtn.disabled = true;
   setupPanel.hidden = true;
   playAgainBtn.hidden = true;
   pendingRelease = false;
   wasResults = false;
   sound.init();
-  session = createBoulderStrikeSession(identities, performance.now());
-  sceneCtx = createSceneContext(canvas, session);
-});
+  const newSession = createBoulderStrikeSession(identities, performance.now());
+  sceneCtx = await createSceneContext(canvas, newSession);
+  session = newSession;
+  startBtn.disabled = false;
+}
 
 playAgainBtn.addEventListener("click", () => {
   session = null;
